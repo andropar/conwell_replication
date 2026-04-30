@@ -5,10 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "conwell_replication"
 version = "0.1.0"
-description = "Replication of Conwell et al. (2024) on the LAION-fMRI dataset, with min_nn generalization splits."
+description = "Replication of Conwell et al. (2024) on the LAION-fMRI dataset, using Conwell's DeepNSD extraction protocol, with min_nn generalization splits."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Johannes Roth" }]
+
+# Core deps. The vendored DeepNSD code at src/conwell_replication/_vendor/deepnsd/
+# is what runs the extraction; the deps below are what the vendored code imports.
+# Model-source-specific deps are listed under [project.optional-dependencies]
+# below — install only the ones whose model_source you actually want to extract.
 dependencies = [
     "numpy",
     "pandas",
@@ -28,32 +33,60 @@ dependencies = [
     "torchvision",
     "timm",
     "transformers",
-    "cornet @ git+https://github.com/dicarlolab/CORnet.git",
-    # deepjuice (Colin Conwell's model-zoo package; private/GH-hosted, not on PyPI).
-    # Install separately on the new server, e.g.:
-    #     pip install git+https://github.com/ColinConwell/DeepJuice.git
-    # If you have a different fork or local checkout, install that instead.
-    # We do NOT pin the URL here so users can substitute their own source.
-    #
-    # laion_fmri (the data downloader). Not yet on PyPI; install from the
-    # location documented at:
-    #     https://laion-fmri.hebartlab.com/laion_fmri_package/index.html
 ]
 
+# Each extra installs the deps for one DeepNSD model_source. Combine as needed.
+# `pip install -e .[full]` brings them all (heavy, slow).
 [project.optional-dependencies]
+clip       = ["clip @ git+https://github.com/openai/CLIP.git"]
+openclip   = ["open_clip_torch"]
+vissl      = ["vissl @ git+https://github.com/facebookresearch/vissl.git",
+              "classy_vision"]
+taskonomy  = ["visualpriors"]
+detectron  = ["detectron2 @ git+https://github.com/facebookresearch/detectron2.git"]
+bit_expert = ["tensorflow", "tensorflow-hub"]
+robustness = ["robustness"]
+vqgan      = ["taming-transformers @ git+https://github.com/CompVis/taming-transformers.git"]
+
+# Convenience: covers the core "vision" model_sources without the
+# heavy detection / depth / VQGAN extras.
+core = [
+    "conwell_replication[clip]",
+    "conwell_replication[openclip]",
+    "conwell_replication[vissl]",
+]
+
+# Everything (will pull in detectron2, tensorflow, etc.).
+full = [
+    "conwell_replication[clip]",
+    "conwell_replication[openclip]",
+    "conwell_replication[vissl]",
+    "conwell_replication[taskonomy]",
+    "conwell_replication[detectron]",
+    "conwell_replication[bit_expert]",
+    "conwell_replication[robustness]",
+    "conwell_replication[vqgan]",
+]
+
 dev = ["pytest", "ruff", "ipython"]
 
 [project.scripts]
-conwell-extract = "conwell_replication.extract.extract_features:main"
+conwell-extract        = "conwell_replication.extract.extract_features:main"
 conwell-eval-splithalf = "conwell_replication.eval.rsa_splithalf:main"
-conwell-eval-min-nn = "conwell_replication.eval.rsa_min_nn:main"
-conwell-noise-ceiling = "conwell_replication.eval.noise_ceiling:main"
+conwell-eval-min-nn    = "conwell_replication.eval.rsa_min_nn:main"
+conwell-noise-ceiling  = "conwell_replication.eval.noise_ceiling:main"
 conwell-prepare-scores = "conwell_replication.analysis.prepare_scores:main"
-conwell-stats = "conwell_replication.analysis.statistical_tests:cli"
-conwell-figures = "conwell_replication.figures.plot_figures:cli"
+conwell-stats          = "conwell_replication.analysis.statistical_tests:cli"
+conwell-figures        = "conwell_replication.figures.plot_figures:cli"
+conwell-build-pool     = "conwell_replication.data.stimuli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"conwell_replication" = ["resources/**/*"]
+"conwell_replication" = [
+    "resources/**/*",
+    # Vendored DeepNSD non-Python assets must ride along (model_typology.csv,
+    # model_meta CSVs, plus the model_code subtrees with their READMEs etc.)
+    "_vendor/deepnsd/**/*",
+]

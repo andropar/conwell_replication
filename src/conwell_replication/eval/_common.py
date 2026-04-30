@@ -24,9 +24,12 @@ import h5py
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-# Vendored DeepNSD imports
-from conwell_replication._vendor.mapping_methods import compare_rdms, score_func  # noqa: F401
-from conwell_replication._vendor.ridge_gcv_mod import RidgeCVMod
+# Vendored DeepNSD imports (importing _vendor primes sys.path for model_opts.*)
+from conwell_replication import _vendor  # noqa: F401  — side effect: model_opts importable
+from conwell_replication._vendor.deepnsd.model_opts.mapping_methods import (  # noqa: F401
+    compare_rdms, score_func,
+)
+from conwell_replication._vendor.deepnsd.ridge_gcv_mod import RidgeCVMod
 
 
 def load_features(h5_path: Path) -> Tuple[Dict[str, np.ndarray], List[str]]:

@@ -1,33 +1,47 @@
-# Custom model weights
+# Manually-transferred weights
 
-This directory hosts weight files for the small set of models that are loaded
-through `conwell_replication._vendor.universal_extractor.get_custom_model`
-rather than through deepjuice.
+The DeepNSD-protocol extractor (now vendored at
+`src/conwell_replication/_vendor/deepnsd/`) downloads most weights at runtime
+via `torch.hub` / `torchvision.datasets.utils.download_url`. The exception
+is the **SLIP** family, whose checkpoint files live inside the DeepNSD
+source tree itself and are too large to ship through GitHub.
 
-Among the **152 curated models**, only one needs a manually-supplied weight
-file:
+## Required: SLIP weights
 
-| Model                          | Required file                  |
-|--------------------------------|--------------------------------|
-| `vissl_resnet50_barlowtwins`   | `resnet50_barlowtwins.pth`     |
+DeepNSD's `model_opts/model_code/_options.py` looks up SLIP checkpoints by
+filename in `model_opts/model_code/slip_weights/`. We **do not vendor**
+those files — they total ~31 GB. Transfer them out-of-band:
 
-The others routed through `get_custom_model` self-download:
+    SRC=/home/jroth/dense-retinotopy-func/src/external/DeepNSD/source_code/pressures/model_opts/model_code/slip_weights
+    DST=src/conwell_replication/_vendor/deepnsd/model_opts/model_code/slip_weights
+    mkdir -p "$DST"
+    rsync -avh "$SRC/" "$DST/"
 
-- `cornet_s` — fetched via the `cornet` package
-- `dinov3-vitl16-pretrain-lvd1689m` — fetched via 🤗 `transformers`
+Files expected (used by the 14 SLIP entries in DeepNSD's registry):
 
-## On the development host (current server)
+- `simclr_small_25ep.pt`, `simclr_base_25ep.pt`, `simclr_large_25ep.pt`
+- `clip_small_25ep.pt`, `clip_base_25ep.pt`, `clip_large_25ep.pt`,
+  `clip_base_cc12m_35ep.pt`
+- `slip_small_25ep.pt`, `slip_base_25ep.pt`, `slip_large_25ep.pt`,
+  `slip_base_cc12m_35ep.pt`, `slip_base_50ep.pt`, `slip_base_100ep.pt`
+- `slip_base_yfcc15m_25ep.pt`
 
-The original file lives at:
+`.pt` files are gitignored, so they stay out of the repo even if accidentally
+copied into the tree.
 
-    /home/jroth/rsa_based_selection/data/resources/resnet50_barlowtwins.pth   (90 MB)
+## Optional: other source-specific caches
 
-Copy it into this directory before the first extraction run:
+Other model sources will populate their own caches under `~/.cache/torch`
+or `~/.cache/huggingface` on first run. If you want to seed those from the
+current server (avoiding a fresh download on the new server), copy:
 
-    cp /home/jroth/rsa_based_selection/data/resources/resnet50_barlowtwins.pth \
-       resources/weights/
-
-`*.pth` files are gitignored, so the weight stays out of the repo.
+| Source     | Cache to copy                                               |
+|------------|-------------------------------------------------------------|
+| timm       | `~/.cache/huggingface/hub/`                                 |
+| torchvision| `~/.cache/torch/hub/checkpoints/`                           |
+| dino       | `~/.cache/torch/hub/checkpoints/dino_*.pth`                 |
+| midas      | `~/.cache/torch/hub/checkpoints/dpt_*.pt`                   |
+| seer       | `_vendor/deepnsd/model_opts/model_code/<seer_*.torch>`      |
 
 ## On a fresh server
 
