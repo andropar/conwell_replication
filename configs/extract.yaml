@@ -1,0 +1,16 @@
+# Default extraction config. Override on the CLI:
+#     python -m conwell_replication.extract.extract_features \
+#         --models   resources/curated_model_list.csv \
+#         --pool     features/stimulus_pool.csv \
+#         --out      features/ \
+#         --gpu      0 \
+#         --batch-size 32
+
+models:           resources/curated_model_list.csv
+pool:             features/stimulus_pool.csv
+images_root:      ${LAION_IMAGES_ROOT:-${LAION_FMRI_ROOT}/images}
+out:              features/
+target_n_layers:  10
+batch_size:       32
+srp_eps:          0.1
+srp_seed:         0

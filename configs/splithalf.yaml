@@ -1,0 +1,13 @@
+# Default split-half (sanity-replication) evaluation config.
+
+features:  features/
+out:       results/splithalf/
+voxel_set: hlvis
+alphas:    [0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0]
+
+subjects:
+  - sub-01
+  - sub-03
+  - sub-05
+  - sub-06
+  - sub-07

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "conwell_replication"
+version = "0.1.0"
+description = "Replication of Conwell et al. (2024) on the LAION-fMRI dataset, with min_nn generalization splits."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Johannes Roth" }]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "h5py",
+    "tqdm",
+    "joblib",
+    "Pillow",
+    "PyYAML",
+    "hydra-core",
+    "omegaconf",
+    "matplotlib",
+    "statsmodels",
+    "pyarrow",
+    "torch",
+    "torchvision",
+    "timm",
+    "transformers",
+    "cornet @ git+https://github.com/dicarlolab/CORnet.git",
+    # deepjuice (Colin Conwell's model-zoo package; private/GH-hosted, not on PyPI).
+    # Install separately on the new server, e.g.:
+    #     pip install git+https://github.com/ColinConwell/DeepJuice.git
+    # If you have a different fork or local checkout, install that instead.
+    # We do NOT pin the URL here so users can substitute their own source.
+    #
+    # laion_fmri (the data downloader). Not yet on PyPI; install from the
+    # location documented at:
+    #     https://laion-fmri.hebartlab.com/laion_fmri_package/index.html
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "ipython"]
+
+[project.scripts]
+conwell-extract = "conwell_replication.extract.extract_features:main"
+conwell-eval-splithalf = "conwell_replication.eval.rsa_splithalf:main"
+conwell-eval-min-nn = "conwell_replication.eval.rsa_min_nn:main"
+conwell-noise-ceiling = "conwell_replication.eval.noise_ceiling:main"
+conwell-prepare-scores = "conwell_replication.analysis.prepare_scores:main"
+conwell-stats = "conwell_replication.analysis.statistical_tests:cli"
+conwell-figures = "conwell_replication.figures.plot_figures:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"conwell_replication" = ["resources/**/*"]

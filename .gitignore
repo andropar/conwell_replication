@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Environments
+.env
+.venv/
+venv/
+
+# Heavy outputs (keep code, not data)
+features/
+results/
+logs/
+outputs/
+*.h5
+*.hdf5
+*.parquet
+*.npy
+*.npz
+*.nii
+*.nii.gz
+*.pth
+*.pt
+*.bin
+
+# Hydra
+multirun/
+.hydra/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
