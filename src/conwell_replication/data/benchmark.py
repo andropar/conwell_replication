@@ -46,14 +46,26 @@ _LOG = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Subject / participant mapping
 # ---------------------------------------------------------------------------
-# This mirrors the DeepVision-era mapping. If the freshly-preprocessed data
-# uses a different convention (e.g. sequential sub-01..sub-05 with no gaps),
-# patch this dict and re-export.
+# IMPORTANT: This is the **unique-image** mapping, not the **shared-image**
+# mapping from the original DeepVision code. The min_nn split builders used
+# the unique-participant mapping when naming the per-subject split
+# directories (p01_full..p05_full), and the unique stimulus filenames
+# follow the same convention. So:
+#
+#   * min_nn ``p02_full`` corresponds to **sub-06** (not sub-03)
+#   * min_nn ``p04_full`` corresponds to **sub-03** (not sub-06)
+#
+# Verified empirically: every unique image_id in min_nn ``p02_full`` exists in
+# /SSD/jroth/deepvision_fmri/cache/image_sets/deepvision_unique_sub-06/ and
+# none in deepvision_unique_sub-03/ (and vice-versa for p04_full).
+#
+# Patch this dict if the freshly-preprocessed data on the target server uses
+# a different convention.
 SUBJECT_TO_PARTICIPANT: Dict[str, str] = {
     "sub-01": "p01",
-    "sub-03": "p02",
+    "sub-03": "p04",
     "sub-05": "p03",
-    "sub-06": "p04",
+    "sub-06": "p02",
     "sub-07": "p05",
 }
 

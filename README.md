@@ -75,7 +75,9 @@ pip install <laion_fmri install URL>   # see https://laion-fmri.hebartlab.com/
 
 ## Data layout (assumed on new server)
 
-Download the LAION-fMRI dataset:
+### Brain data
+
+Download via the `laion_fmri` package:
 
 ```python
 from laion_fmri import dataset_initialize, set_aws_credentials, download
@@ -91,22 +93,58 @@ Set the env var so the LAIONBenchmark adapter can find it:
 export LAION_FMRI_ROOT=/path/to/laion_fmri_data
 ```
 
-Subject-to-participant mapping (carried over from DeepVision; verify on the
-new server):
+### Stimulus images — rsync from iris (no AWS download needed)
 
-| subject  | participant |
-|----------|-------------|
-| sub-01   | p01         |
-| sub-03   | p02         |
-| sub-05   | p03         |
-| sub-06   | p04         |
-| sub-07   | p05         |
+The 24,681 union-pool stimuli already exist as JPGs on iris.cbs.mpg.de.
+Total ~4.3 GB — rsync directly from there:
+
+```bash
+# From an MPCDF Viper login node (assumes ssh access to iris is set up):
+rsync -avhP jroth@iris.cbs.mpg.de:/SSD/jroth/deepvision_fmri/cache/image_sets/ \
+    $WORK/conwell_replication/stimuli/image_sets/
+```
+
+That gives you the full directory structure the build-pool resolver expects:
+
+```
+image_sets/
+├── deepvision_shared/                   1492 jpgs (every shared_*.jpg)
+├── deepvision_unique_sub-01/            4712 jpgs (filenames end _p01.jpg)
+├── deepvision_unique_sub-03/            4712 jpgs (filenames end _p04.jpg !)
+├── deepvision_unique_sub-05/            4712 jpgs (filenames end _p03.jpg)
+├── deepvision_unique_sub-06/            4712 jpgs (filenames end _p02.jpg !)
+└── deepvision_unique_sub-07/            4712 jpgs (filenames end _p05.jpg)
+```
+
+### Subject ↔ participant mapping (the **unique-image** mapping)
+
+Caveat: min_nn participant labels follow the **unique-stimulus** mapping
+from the original DeepVision data, not the shared-stimulus mapping. They
+agree for sub-01, sub-05, sub-07; **swapped for sub-03 and sub-06**:
+
+| subject  | min_nn participant | shared participant |
+|----------|--------------------|--------------------|
+| sub-01   | p01                | p01                |
+| sub-03   | **p04**            | p02                |
+| sub-05   | p03                | p03                |
+| sub-06   | **p02**            | p04                |
+| sub-07   | p05                | p05                |
+
+The repo's [SUBJECT_TO_PARTICIPANT](src/conwell_replication/data/benchmark.py)
+encodes the min_nn (unique) mapping, which is what every downstream
+component uses. If the freshly preprocessed `laion_fmri` data ships with a
+different mapping, edit that dict and the unique-cache resolver in
+[data/stimuli.py](src/conwell_replication/data/stimuli.py).
 
 ## Pipeline
 
 ```bash
-# 1. Cache the union of per-subject stimulus pools (deduplicated, ~24k images)
-conwell-build-pool build-pool --output features/stimulus_pool.csv
+# 1. Cache the union of per-subject stimulus pools (deduplicated, ~24k images).
+#    Pass --stimuli-root so the resolved on-disk image paths land in the CSV
+#    (and existence is sanity-checked).
+conwell-build-pool build-pool \
+    --stimuli-root $WORK/conwell_replication/stimuli/image_sets \
+    --output       features/stimulus_pool.csv
 
 # 2. Extract features for the 335-model registry on the union pool
 #    (one .h5 per model, image_id-indexed, SRP-reduced)
