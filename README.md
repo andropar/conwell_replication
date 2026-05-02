@@ -24,9 +24,11 @@ Two evaluation modes:
 1. **Split-half** (Conwell-style): even/odd split of the shared-stimulus
    subset. Used as a sanity gate against
    `experiments/ccn2025_continuation/rsa_large_scale_benchmark/results/rsa_20260223_154344/`.
-2. **min_nn generalization splits**: per-subject train/test partitions over
-   the full per-subject stimulus pool. 13 splits per subject (3 `tau_*`,
-   5 `random_*`, 5 `cluster_k5_*`).
+2. **Generalization splits** via [`laion_fmri.splits`](https://github.com/ViCCo-Group/LAION-fMRI):
+   the 11 train/test splits per pool from the upstream dataloader (5
+   `random_*` baselines, 5 `cluster_k5_*` cluster-holdout folds, 1 `tau`
+   MMD-matched 80/20 split). Available for the cross-subject `shared`
+   pool (1,121 images) or any per-subject pool (5,833 images).
 
 Models: DeepNSD's **335 trained models** (the 489-model registry filtered to
 `train_type != "random"`). Defined in
@@ -48,8 +50,10 @@ resources/
   conwell_model_list.csv   335-model trained subset of DeepNSD's registry
   model_metadata.csv       Per-model comparison-group metadata (from the
                            prior 413-model replication)
-  splits/p0{1..5}/         min_nn split JSONs (variant lists per split)
   weights/README.md        Notes on transferring SLIP / other heavy weights
+
+# Splits live upstream — pulled in via the `laion-fmri` dep declared in
+# pyproject.toml. See https://github.com/ViCCo-Group/LAION-fMRI
 
 configs/             hydra YAMLs
 scripts/             helper shell scripts
@@ -67,8 +71,8 @@ pip install -e .                  # core only
 pip install -e .[clip,openclip,vissl]   # the most-used extras
 pip install -e .[full]            # everything (heavy: detectron2, tensorflow, ...)
 
-# Plus the data downloader:
-pip install <laion_fmri install URL>   # see https://laion-fmri.hebartlab.com/
+# `laion-fmri` (data downloader + bundled train/test splits) is already
+# declared as a dep, so it installs automatically with `-e .` above.
 
 # Plus the SLIP weights (~31 GB) — see resources/weights/README.md
 ```
@@ -116,25 +120,20 @@ image_sets/
 └── deepvision_unique_sub-07/            4712 jpgs (filenames end _p05.jpg)
 ```
 
-### Subject ↔ participant mapping (the **unique-image** mapping)
+### Subject IDs
 
-Caveat: min_nn participant labels follow the **unique-stimulus** mapping
-from the original DeepVision data, not the shared-stimulus mapping. They
-agree for sub-01, sub-05, sub-07; **swapped for sub-03 and sub-06**:
+The benchmark, evaluators and splits all use the same BIDS-style subject
+IDs as `laion_fmri`: `sub-01`, `sub-03`, `sub-05`, `sub-06`, `sub-07`.
+The `laion_fmri.splits` upstream package handles the per-subject pool
+indexing internally (no participant-code abstraction is exposed to user
+code anymore).
 
-| subject  | min_nn participant | shared participant |
-|----------|--------------------|--------------------|
-| sub-01   | p01                | p01                |
-| sub-03   | **p04**            | p02                |
-| sub-05   | p03                | p03                |
-| sub-06   | **p02**            | p04                |
-| sub-07   | p05                | p05                |
-
-The repo's [SUBJECT_TO_PARTICIPANT](src/conwell_replication/data/benchmark.py)
-encodes the min_nn (unique) mapping, which is what every downstream
-component uses. If the freshly preprocessed `laion_fmri` data ships with a
-different mapping, edit that dict and the unique-cache resolver in
-[data/stimuli.py](src/conwell_replication/data/stimuli.py).
+The only place the old participant codes still surface is in stimulus
+*filenames* under `deepvision_unique_<sub>/`: filenames carry whichever
+participant code the source HDF5 used at acquisition time, which differs
+from the BIDS subject id for sub-03 ↔ sub-06. The unique-cache resolver
+in [`data/stimuli.py`](src/conwell_replication/data/stimuli.py) handles
+this; nothing downstream of `build-pool` cares.
 
 ## Pipeline
 
@@ -158,13 +157,20 @@ conwell-extract \
 
 # 3. Compute noise ceilings
 conwell-noise-ceiling --mode shared --out results/splithalf/noise_ceilings.csv
-conwell-noise-ceiling --mode min_nn --out results/min_nn/noise_ceilings.csv
+conwell-noise-ceiling --mode min_nn --pool shared \
+    --out results/min_nn_shared/noise_ceilings.csv
+conwell-noise-ceiling --mode min_nn \
+    --out results/min_nn_per_subject/noise_ceilings.csv   # uses each subject's own pool
 
 # 4a. (Sanity) Split-half evaluation on shared-stimulus subset
 conwell-eval-splithalf --features features/ --out results/splithalf/
 
-# 4b. min_nn evaluation on 13 splits × 5 subjects
-conwell-eval-min-nn --features features/ --out results/min_nn/
+# 4b. Generalization evaluation on 11 splits.
+#     Pick the pool to match the original study's stimulus scope:
+conwell-eval-min-nn --features features/ --pool shared \
+    --out results/min_nn_shared/
+conwell-eval-min-nn --features features/ \
+    --out results/min_nn_per_subject/   # uses each subject's own pool by default
 
 # 5. Best-layer selection + statistical tests
 for D in results/splithalf results/min_nn; do

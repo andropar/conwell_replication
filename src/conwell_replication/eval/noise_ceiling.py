@@ -28,12 +28,9 @@ import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr, spearmanr
 
-from conwell_replication.data import (
-    LAIONBenchmark,
-    SUBJECT_TO_PARTICIPANT,
-    list_splits,
-    load_split,
-)
+from laion_fmri.splits import list_splits, load_split
+
+from conwell_replication.data import LAIONBenchmark
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +76,7 @@ def compute_shared_pool_nc(subjects: Iterable[str], voxel_set: str, seed: int) -
     rows = []
     for sub in subjects:
         log.info(f"[shared] {sub}")
-        bench = LAIONBenchmark(subject=sub, voxel_set=voxel_set, image_pool="shared")
+        bench = LAIONBenchmark(subject=sub, voxel_set=voxel_set, pool="shared")
         rdm_odd, rdm_even, kept = bench.trial_splithalf_rdms(seed=seed)
         rows.append(_nc_row(sub, rdm_odd, rdm_even, len(kept)))
     return pd.DataFrame(rows)
@@ -90,32 +87,34 @@ def compute_min_nn_nc(
     voxel_set: str,
     splits: Optional[Iterable[str]],
     seed: int,
-    splits_root: Optional[Path],
+    pool: Optional[str] = None,
 ) -> pd.DataFrame:
     rows = []
     for sub in subjects:
-        participant = SUBJECT_TO_PARTICIPANT[sub]
-        log.info(f"[min_nn] {sub} ({participant})")
-        bench = LAIONBenchmark(subject=sub, voxel_set=voxel_set, image_pool="all")
-        sp_names = list(splits) if splits else list_splits(participant, splits_root=splits_root)
+        eval_pool = pool or sub
+        log.info(f"[min_nn] subject={sub}, pool={eval_pool}")
+        bench = LAIONBenchmark(subject=sub, voxel_set=voxel_set, pool=eval_pool)
+        sp_names = list(splits) if splits else list_splits()
         for sp_name in sp_names:
-            sp = load_split(participant, sp_name, splits_root=splits_root)
+            sp = load_split(sp_name, pool=eval_pool)
             for variant in sp.variants:
-                # Test set noise ceiling (this is what eve uses for min_nn)
+                # Test set noise ceiling (eve uses this for min_nn)
                 rdm_odd, rdm_even, kept = bench.trial_splithalf_rdms(
                     image_ids=variant.test_ids, seed=seed,
                 )
                 rows.append(_nc_row(
                     sub, rdm_odd, rdm_even, len(kept),
-                    extra={"split": sp_name, "variant": variant.variant_id, "score_set": "test"},
+                    extra={"split": sp_name, "variant": variant.variant_id,
+                           "score_set": "test", "pool": eval_pool},
                 ))
-                # Train set NC for completeness (eg. when reporting eve on train)
+                # Train set NC for completeness (when reporting eve on train)
                 rdm_odd_tr, rdm_even_tr, kept_tr = bench.trial_splithalf_rdms(
                     image_ids=variant.train_ids, seed=seed,
                 )
                 rows.append(_nc_row(
                     sub, rdm_odd_tr, rdm_even_tr, len(kept_tr),
-                    extra={"split": sp_name, "variant": variant.variant_id, "score_set": "train"},
+                    extra={"split": sp_name, "variant": variant.variant_id,
+                           "score_set": "train", "pool": eval_pool},
                 ))
     return pd.DataFrame(rows)
 
@@ -130,8 +129,11 @@ def parse_args(argv: Optional[list] = None):
                     default=["sub-01", "sub-03", "sub-05", "sub-06", "sub-07"])
     ap.add_argument("--voxel-set", default="hlvis", choices=("hlvis", "visual"))
     ap.add_argument("--splits", nargs="+", default=None,
-                    help="Subset of split names to run (default: all 13).")
-    ap.add_argument("--splits-root", type=Path, default=None)
+                    help="Subset of split names to run (default: all 11).")
+    ap.add_argument("--pool", default=None,
+                    help="Pool to evaluate over (min_nn mode only): "
+                         "'shared' or a subject id like 'sub-01'. If "
+                         "omitted, uses each --subject's own pool.")
     ap.add_argument("--seed", type=int, default=0,
                     help="Permutation seed for odd/even trial splitting.")
     ap.add_argument("--out", type=Path, required=True,
@@ -147,7 +149,7 @@ def main(argv: Optional[list] = None) -> int:
         df = compute_shared_pool_nc(args.subjects, args.voxel_set, args.seed)
     else:
         df = compute_min_nn_nc(
-            args.subjects, args.voxel_set, args.splits, args.seed, args.splits_root,
+            args.subjects, args.voxel_set, args.splits, args.seed, pool=args.pool,
         )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -42,7 +42,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from conwell_replication.data import LAIONBenchmark, SUBJECT_TO_PARTICIPANT, load_split, list_splits
+from laion_fmri.splits import list_splits, load_split
+
+from conwell_replication.data import LAIONBenchmark
 from conwell_replication.eval._common import (
     align_features,
     compare_rdms,
@@ -175,8 +177,10 @@ def parse_args(argv: Optional[list] = None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--features", type=Path, required=True,
                     help="Directory of per-model SRP feature .h5 files.")
-    ap.add_argument("--splits-root", type=Path, default=None,
-                    help="Override resources/splits root.")
+    ap.add_argument("--pool", default=None,
+                    help="Pool to evaluate over: 'shared' or a subject id "
+                         "like 'sub-01'. If omitted, uses each --subject's "
+                         "own pool (e.g. sub-01 evaluates on the sub-01 pool).")
     ap.add_argument("--out", type=Path, required=True,
                     help="Output directory for results parquets.")
     ap.add_argument("--subjects", nargs="+",
@@ -215,24 +219,26 @@ def main(argv: Optional[list] = None) -> int:
 
     all_rows: List[dict] = []
     for subject in args.subjects:
-        participant = SUBJECT_TO_PARTICIPANT[subject]
-        _log(f"=== Subject {subject} ({participant}) ===")
+        # Pool may be the subject's own (default) or "shared" — set via
+        # --pool. Every split's train/test image_ids are a subset of the
+        # benchmark's response_data, since pool selection happens in the
+        # benchmark.
+        pool = args.pool or subject
+        _log(f"=== Subject {subject}, pool={pool} ===")
 
-        # Load benchmark with the full per-subject pool — every split's
-        # train/test image_ids are a subset of the all-images response_data.
         bench = LAIONBenchmark(
             subject=subject,
             voxel_set=args.voxel_set,
-            image_pool="all",
+            pool=pool,
         )
         _log(f"  loaded benchmark: {bench.n_stimuli} stimuli, "
              f"{bench.response_data.shape[0]} voxels")
 
-        split_names = args.splits or list_splits(participant, splits_root=args.splits_root)
+        split_names = args.splits or list_splits()
         _log(f"  running {len(split_names)} splits: {split_names}")
 
         for split_name in split_names:
-            sp = load_split(participant, split_name, splits_root=args.splits_root)
+            sp = load_split(split_name, pool=pool)
             for variant in sp.variants:
                 rows: List[dict] = []
                 for h5_path in tqdm(

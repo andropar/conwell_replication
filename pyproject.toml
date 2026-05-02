@@ -33,6 +33,8 @@ dependencies = [
     "torchvision",
     "timm",
     "transformers",
+    # The data downloader + bundled train/test splits.
+    "laion-fmri @ git+https://github.com/ViCCo-Group/LAION-fMRI.git",
 ]
 
 # Each extra installs the deps for one DeepNSD model_source. Combine as needed.

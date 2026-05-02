@@ -199,7 +199,7 @@ def main(argv: Optional[list] = None) -> int:
         bench = LAIONBenchmark(
             subject=subject,
             voxel_set=args.voxel_set,
-            image_pool="shared",
+            pool="shared",
         )
         _log(f"  loaded benchmark: {bench.n_stimuli} stimuli, "
              f"{bench.response_data.shape[0]} voxels")

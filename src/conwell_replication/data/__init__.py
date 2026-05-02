@@ -1,14 +1,14 @@
-"""Data layer: LAION-fMRI benchmark adapter, splits, stimulus pool."""
+"""Data layer: LAION-fMRI benchmark adapter + stimulus-pool builder.
 
-from .benchmark import LAIONBenchmark, SUBJECT_TO_PARTICIPANT
-from .splits import Split, SplitVariant, load_split, load_all_splits, list_splits
+Train/test splits are not bundled here — they live in
+:mod:`laion_fmri.splits` (the upstream package). Import from there:
 
-__all__ = [
-    "LAIONBenchmark",
-    "SUBJECT_TO_PARTICIPANT",
-    "Split",
-    "SplitVariant",
-    "load_split",
-    "load_all_splits",
-    "list_splits",
-]
+    from laion_fmri.splits import (
+        list_pools, list_splits,
+        load_split, get_train_test_ids, get_split_masks,
+    )
+"""
+
+from .benchmark import LAIONBenchmark
+
+__all__ = ["LAIONBenchmark"]
