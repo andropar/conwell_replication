@@ -1,0 +1,2 @@
+breakpoint_1_rank,breakpoint_1_score,breakpoint_2_rank,breakpoint_2_score,n_models_top_segment,n_models_middle_segment,n_models_bottom_segment,sse,metric,n_models,top_model,top_score,method,ci_method
+84,0.43257714033126826,107,0.20492634415626526,84,23,10,0.008474150961243295,wrsa,117,levit_128_classification,0.5465446841716767,pure_python_grid_search_two_breakpoints,not_computed

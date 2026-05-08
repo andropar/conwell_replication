@@ -1,0 +1,447 @@
+#!/usr/bin/env python3
+"""RSA Evaluation: CRSA, WRSA, and SRPR.
+
+Supports parallel execution via SLURM by splitting work across:
+- Subjects (5 subjects)
+- Model batches (configurable, default 10 models per batch)
+
+Evaluation types:
+- CRSA: Classical RSA - correlate model RDM with brain RDM (fast, no ridge)
+- WRSA: Weighted RSA - correlate predicted-response RDM with brain RDM (needs ridge)
+- SRPR: Single-voxel prediction correlation (needs ridge)
+
+Usage:
+    # Run all evaluations for all subjects and models
+    python run_rsa_eval.py
+
+    # Run single subject, single batch (for SLURM parallelization)
+    python run_rsa_eval.py parallel.subject=sub-01 parallel.model_batch=0
+
+    # Run only CRSA (fast)
+    python run_rsa_eval.py eval.wrsa=false eval.srpr=false
+
+    # Resume from existing run
+    python run_rsa_eval.py resume_from=/path/to/existing/run
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import h5py
+import hydra
+import numpy as np
+import pandas as pd
+from omegaconf import DictConfig, OmegaConf
+from sklearn import preprocessing
+from tqdm import tqdm
+
+# Add cstims to path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.append('/u/rothj/DeepNSD/source_code/pressures')
+
+from cstims.datasets.deepvision import DeepVisionBenchmark
+from model_opts.mapping_methods import compare_rdms, score_func
+from ridge_gcv_mod import RidgeCVMod
+
+
+def log(msg: str):
+    """Print with timestamp."""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def load_features_h5(h5_path: Path) -> Dict[str, np.ndarray]:
+    """Load SRP features from HDF5 file."""
+    features = {}
+    with h5py.File(h5_path, "r") as f:
+        if "features_srp" not in f:
+            raise ValueError(f"No features_srp in {h5_path}")
+        grp = f["features_srp"]
+        for layer_name in grp.keys():
+            features[layer_name] = grp[layer_name][:]
+    return features
+
+
+def evaluate_model(
+    h5_path: Path,
+    benchmark: DeepVisionBenchmark,
+    splithalf_rdms: dict,
+    rdm_indices: dict,
+    alpha_values: List[float],
+    do_crsa: bool = True,
+    do_wrsa: bool = True,
+    do_srpr: bool = True,
+) -> Tuple[str, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Evaluate a single model for CRSA, WRSA, and SRPR."""
+    model_name = h5_path.stem.replace("-", "/")
+    model_start = time.time()
+
+    # Load features
+    features = load_features_h5(h5_path)
+    n_layers = len(features)
+    log(f"  Loaded {n_layers} layers from {h5_path.name}")
+
+    crsa_results = []
+    wrsa_results = []
+    srpr_results = []
+
+    # Get voxel indices for the ROI (prefer hlvis if available)
+    if "hlvis" in rdm_indices:
+        target_region = "hlvis"
+    else:
+        target_region = list(rdm_indices.keys())[0]
+    first_subj = list(rdm_indices[target_region].keys())[0]
+    roi_voxel_indices = rdm_indices[target_region][first_subj]
+    log(f"  ROI '{target_region}': {len(roi_voxel_indices)} voxels")
+
+    # Prepare response data for ridge regression (only if needed)
+    need_ridge = do_wrsa or do_srpr
+    if need_ridge:
+        response_data_np = benchmark.response_data.to_numpy()
+        response_data_roi = response_data_np[roi_voxel_indices, :]
+        y_train = response_data_roi[:, ::2].T
+        y_test = response_data_roi[:, 1::2].T
+        log(f"  Response data: y_train={y_train.shape}, y_test={y_test.shape}")
+
+    for layer_idx, (layer_name, feature_map) in enumerate(features.items()):
+        layer_start = time.time()
+        log(f"  Layer {layer_idx+1}/{n_layers}: {layer_name} ({feature_map.shape[1]} features)")
+
+        # CRSA: Classical RSA (no ridge needed)
+        if do_crsa:
+            model_rdms = {
+                "train": 1 - np.corrcoef(feature_map[::2, :]),
+                "test": 1 - np.corrcoef(feature_map[1::2, :]),
+            }
+            for score_set in ["train", "test"]:
+                for region in splithalf_rdms:
+                    for subj_id in splithalf_rdms[region]:
+                        target_rdm = splithalf_rdms[region][subj_id][score_set]
+                        score = compare_rdms(model_rdms[score_set], target_rdm)
+                        crsa_results.append({
+                            "score": score,
+                            "score_set": score_set,
+                            "region": region,
+                            "subj_id": subj_id,
+                            "model": model_name,
+                            "model_layer": layer_name,
+                            "model_layer_index": layer_idx,
+                        })
+
+        # WRSA and SRPR require ridge regression
+        if need_ridge:
+            # Split-half scaling
+            scaler = preprocessing.StandardScaler()
+            X_train = scaler.fit_transform(feature_map[::2, :])
+            X_test = scaler.transform(feature_map[1::2, :])
+
+            # Fit ridge regression
+            regression = RidgeCVMod(
+                alphas=alpha_values,
+                alpha_per_target=True,
+                scoring="pearson_r",
+            )
+            regression.store_cv_values = True
+
+            ridge_start = time.time()
+            try:
+                regression.fit(X_train, y_train)
+                ridge_time = time.time() - ridge_start
+                log(f"    Ridge fit done in {ridge_time:.1f}s")
+            except Exception as e:
+                log(f"    Ridge fit FAILED: {e}")
+                continue
+
+            # Get predictions
+            best_alpha_idx = np.array([alpha_values.index(a) for a in regression.alpha_])
+            cv_values = getattr(regression, 'cv_values_', getattr(regression, 'cv_results_', None))
+            if cv_values is None:
+                log(f"    ERROR: No cv_values_ or cv_results_ found!")
+                continue
+            pred_train = np.take_along_axis(
+                cv_values, best_alpha_idx[None, :, None], axis=2
+            )[:, :, 0]
+            pred_test = X_test @ regression.coef_.T + regression.intercept_
+            predictions = {"train": pred_train, "test": pred_test}
+
+            # WRSA: RDM from predictions
+            if do_wrsa:
+                for score_set in ["train", "test"]:
+                    for region in splithalf_rdms:
+                        for subj_id in splithalf_rdms[region]:
+                            pred_subset = predictions[score_set]
+                            model_rdm = 1 - np.corrcoef(pred_subset)
+                            target_rdm = splithalf_rdms[region][subj_id][score_set]
+                            score = compare_rdms(model_rdm, target_rdm)
+                            wrsa_results.append({
+                                "score": score,
+                                "score_set": score_set,
+                                "region": region,
+                                "subj_id": subj_id,
+                                "model": model_name,
+                                "model_layer": layer_name,
+                                "model_layer_index": layer_idx,
+                            })
+
+            # SRPR: Single-voxel prediction correlation
+            if do_srpr:
+                for score_set in ["train", "test"]:
+                    y = y_train if score_set == "train" else y_test
+                    y_pred = predictions[score_set]
+                    scores = score_func(y, y_pred, score_type="pearson_r")
+                    for region in splithalf_rdms:
+                        for subj_id in splithalf_rdms[region]:
+                            mean_score = scores.mean()
+                            srpr_results.append({
+                                "score": mean_score,
+                                "score_set": score_set,
+                                "region": region,
+                                "subj_id": subj_id,
+                                "model": model_name,
+                                "model_layer": layer_name,
+                                "model_layer_index": layer_idx,
+                            })
+
+        layer_time = time.time() - layer_start
+        log(f"    Layer done in {layer_time:.1f}s")
+
+    crsa_df = pd.DataFrame(crsa_results)
+    wrsa_df = pd.DataFrame(wrsa_results)
+    srpr_df = pd.DataFrame(srpr_results)
+    model_time = time.time() - model_start
+    log(f"  Model done in {model_time:.1f}s: {len(crsa_results)} CRSA, {len(wrsa_results)} WRSA, {len(srpr_results)} SRPR rows")
+
+    return model_name, crsa_df, wrsa_df, srpr_df
+
+
+def get_completed_models(run_dir: Path, subject: str, eval_type: str, batch_idx: int | None) -> set:
+    """Get set of already completed model names for a subject."""
+    completed = set()
+    if batch_idx is not None:
+        result_file = run_dir / f"{eval_type}_{subject}_batch{batch_idx}.parquet"
+    else:
+        result_file = run_dir / f"{eval_type}_{subject}.parquet"
+    if result_file.exists():
+        df = pd.read_parquet(result_file)
+        completed = set(df["model"].unique())
+    return completed
+
+
+def save_results(
+    run_dir: Path,
+    subject: str,
+    crsa_df: pd.DataFrame,
+    wrsa_df: pd.DataFrame,
+    srpr_df: pd.DataFrame,
+    batch_idx: int | None = None,
+):
+    """Save results to parquet files."""
+    for eval_type, df in [("crsa", crsa_df), ("wrsa", wrsa_df), ("srpr", srpr_df)]:
+        if df.empty:
+            continue
+
+        if batch_idx is not None:
+            result_file = run_dir / f"{eval_type}_{subject}_batch{batch_idx}.parquet"
+        else:
+            result_file = run_dir / f"{eval_type}_{subject}.parquet"
+
+        if result_file.exists():
+            existing = pd.read_parquet(result_file)
+            df = pd.concat([existing, df], ignore_index=True)
+        df.to_parquet(result_file, index=False)
+
+
+def get_model_batch(feature_files: List[Path], batch_idx: int, models_per_batch: int) -> List[Path]:
+    """Get subset of models for a specific batch."""
+    start = batch_idx * models_per_batch
+    end = start + models_per_batch
+    return feature_files[start:end]
+
+
+def combine_all_results(run_dir: Path, subjects: List[str], eval_types: List[str]):
+    """Combine per-subject/batch results into final files."""
+    log("Combining all results...")
+
+    for eval_type in eval_types:
+        all_results = []
+
+        for subject in subjects:
+            # Find all batch files for this subject
+            batch_files = sorted(run_dir.glob(f"{eval_type}_{subject}_batch*.parquet"))
+
+            if batch_files:
+                subject_df = pd.concat(
+                    [pd.read_parquet(f) for f in batch_files],
+                    ignore_index=True,
+                )
+                subject_df = subject_df.drop_duplicates(
+                    subset=["model", "model_layer", "region", "subj_id", "score_set"],
+                    keep="last",
+                )
+                subject_df.to_parquet(run_dir / f"{eval_type}_{subject}.parquet", index=False)
+                all_results.append(subject_df)
+                log(f"  {eval_type} {subject}: {len(subject_df)} rows, {subject_df['model'].nunique()} models")
+            else:
+                result_file = run_dir / f"{eval_type}_{subject}.parquet"
+                if result_file.exists():
+                    df = pd.read_parquet(result_file)
+                    all_results.append(df)
+                    log(f"  {eval_type} {subject}: {len(df)} rows")
+
+        if all_results:
+            final_df = pd.concat(all_results, ignore_index=True)
+            final_df.to_parquet(run_dir / f"{eval_type}_all_models.parquet", index=False)
+            log(f"Saved {len(final_df)} {eval_type.upper()} rows ({final_df['model'].nunique()} models)")
+
+            # Top models summary
+            log(f"\n=== Top 10 Models (Test {eval_type.upper()}) ===")
+            top = (
+                final_df[final_df["score_set"] == "test"]
+                .groupby("model")["score"]
+                .mean()
+                .sort_values(ascending=False)
+                .head(10)
+            )
+            for i, (model, score) in enumerate(top.items(), 1):
+                log(f"  {i:2d}. {model[:50]:50s} {score:.4f}")
+
+
+@hydra.main(version_base=None, config_path="config", config_name="wrsa_eval")
+def main(cfg: DictConfig):
+    print("=" * 60)
+    print("Large-Scale Model Benchmark - RSA Evaluation")
+    print("=" * 60)
+    print(f"\nConfig:\n{OmegaConf.to_yaml(cfg)}")
+
+    # Determine which evaluations to run
+    do_crsa = cfg.eval.crsa
+    do_wrsa = cfg.eval.wrsa
+    do_srpr = cfg.eval.srpr
+    eval_types = []
+    if do_crsa:
+        eval_types.append("crsa")
+    if do_wrsa:
+        eval_types.append("wrsa")
+    if do_srpr:
+        eval_types.append("srpr")
+    log(f"Evaluations: {', '.join(eval_types)}")
+
+    # Resolve paths
+    features_dir = Path(cfg.paths.features_dir)
+    cache_root = Path(cfg.paths.cache_root)
+    deepvision_root = Path(cfg.paths.deepvision_root)
+
+    # Get feature files
+    if cfg.parallel.model_filter:
+        pattern = f"{cfg.parallel.model_filter}.h5" if not cfg.parallel.model_filter.endswith(".h5") else cfg.parallel.model_filter
+        feature_files = sorted(features_dir.glob(pattern))
+    else:
+        feature_files = sorted(features_dir.glob("*.h5"))
+    log(f"Found {len(feature_files)} feature files")
+
+    # Determine output directory
+    if cfg.resume_from:
+        run_dir = Path(cfg.resume_from)
+        log(f"Resuming from: {run_dir}")
+    else:
+        run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+        log(f"Output directory: {run_dir}")
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine which subjects to process
+    if cfg.parallel.subject:
+        subjects = [cfg.parallel.subject]
+    else:
+        subjects = list(cfg.subjects)
+
+    # Determine which models to process
+    if cfg.parallel.model_batch is not None:
+        feature_files = get_model_batch(
+            feature_files, cfg.parallel.model_batch, cfg.parallel.models_per_batch
+        )
+        log(f"Processing batch {cfg.parallel.model_batch}: {len(feature_files)} models")
+
+    log(f"Subjects: {subjects}")
+
+    # Alpha values for ridge
+    alpha_values = list(cfg.ridge.alphas)
+
+    # Process each subject
+    for subject in subjects:
+        log(f"\n{'=' * 60}")
+        log(f"Subject: {subject}")
+        log(f"{'=' * 60}")
+
+        # Load benchmark data once per subject
+        log("Loading benchmark data...")
+        benchmark = DeepVisionBenchmark(
+            cache_root=cache_root,
+            deepvision_fmri_root=deepvision_root,
+            subject=subject,
+            voxel_set=cfg.benchmark.voxel_set,
+            input_source=cfg.benchmark.input_source,
+            build_rdms=True,
+        )
+
+        splithalf_rdms = benchmark.get_splithalf_rdms()
+        rdm_indices = benchmark.get_rdm_indices(row_number=True)
+        log(f"Split-half RDMs: {list(splithalf_rdms.keys())}")
+
+        # Check what's already done (use first eval type for checking)
+        completed = get_completed_models(run_dir, subject, eval_types[0], cfg.parallel.model_batch)
+        if completed:
+            log(f"Already completed: {len(completed)} models")
+
+        log(f"Processing {len(feature_files)} models...")
+
+        # Process each model
+        for model_idx, h5_path in enumerate(feature_files):
+            model_name = h5_path.stem.replace("-", "/")
+
+            if model_name in completed:
+                log(f"[{model_idx+1}/{len(feature_files)}] Skipping {model_name} (already completed)")
+                continue
+
+            try:
+                log(f"[{model_idx+1}/{len(feature_files)}] Starting {model_name}...")
+                model_name, crsa_df, wrsa_df, srpr_df = evaluate_model(
+                    h5_path, benchmark, splithalf_rdms, rdm_indices, alpha_values,
+                    do_crsa=do_crsa, do_wrsa=do_wrsa, do_srpr=do_srpr,
+                )
+
+                # Add subject column
+                if not crsa_df.empty:
+                    crsa_df["subject"] = subject
+                if not wrsa_df.empty:
+                    wrsa_df["subject"] = subject
+                if not srpr_df.empty:
+                    srpr_df["subject"] = subject
+
+                # Save results
+                save_results(
+                    run_dir, subject, crsa_df, wrsa_df, srpr_df,
+                    batch_idx=cfg.parallel.model_batch,
+                )
+                log(f"[{model_idx+1}/{len(feature_files)}] Saved results for {model_name}")
+
+            except Exception as e:
+                log(f"[{model_idx+1}/{len(feature_files)}] ERROR {h5_path.stem}: {e}")
+                traceback.print_exc()
+
+    # Only combine results if running all subjects and all models
+    if not cfg.parallel.subject and cfg.parallel.model_batch is None:
+        combine_all_results(run_dir, subjects, eval_types)
+
+    log("\n" + "=" * 60)
+    log("EVALUATION COMPLETE")
+    log("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

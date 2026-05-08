@@ -1,0 +1,2 @@
+breakpoint_1_rank,breakpoint_1_score,breakpoint_2_rank,breakpoint_2_score,n_models_top_segment,n_models_middle_segment,n_models_bottom_segment,sse,metric,n_models,top_model,top_score,method,ci_method
+91,0.40092491507530204,107,0.211155177950859,91,16,10,0.010369605815986416,wrsa,117,swin_tiny_patch4_window7_224_classification,0.5287981009483337,pure_python_grid_search_two_breakpoints,not_computed

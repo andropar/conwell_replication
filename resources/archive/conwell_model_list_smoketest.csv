@@ -1,0 +1,2 @@
+option_key,model_name,train_type,train_data,model_source
+alexnet_classification,alexnet,classification,imagenet,torchvision

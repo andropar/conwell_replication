@@ -1,0 +1,3 @@
+subject,model,layer,image_set,n_train,n_test,wrsa_train,wrsa_test,crsa_test
+sub-01,alexnet_classification,MaxPool2d-3,non_ood_1121,561,560,0.5549040839983655,0.28020923160538863,0.24526308800415364
+sub-01,alexnet_classification,MaxPool2d-3,all_incl_ood_1492,746,746,0.5473408131412918,0.3573883189581802,0.29137295193744295

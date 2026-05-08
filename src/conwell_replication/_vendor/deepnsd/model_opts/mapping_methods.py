@@ -114,10 +114,14 @@ def compare_rdms(rdm1, rdm2, dist_type='pearson'):
     rdm1_triu = rdm1[np.triu_indices(rdm1.shape[0], k=1)]
     rdm2_triu = rdm2[np.triu_indices(rdm2.shape[0], k=1)]
     
-    if (np.sum(np.isnan(rdm1_triu)) > 0 or 
+    if (np.sum(np.isnan(rdm1_triu)) > 0 or
         np.sum(np.isnan(rdm2_triu)) > 0):
-        warn('Warning: RDMs contain NaNs...',
-             'Returning None.'); return None
+        # Upstream had `warn('msg', 'Warning')` which raises TypeError
+        # ('category must be a Warning subclass'). Use float('nan') instead
+        # so the caller stores NaN in the score column rather than crashing
+        # the whole subject × split.
+        warn('compare_rdms: RDMs contain NaNs; returning NaN.', RuntimeWarning)
+        return float('nan')
     
     if dist_type == 'pearson':
         return pearsonr(rdm1_triu, rdm2_triu)[0]

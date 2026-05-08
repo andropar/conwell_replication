@@ -1,0 +1,6 @@
+subject,nc_pearson,n_voxels,n_stimuli,source,region,metric
+sub-01,0.7691296326834417,6662,560,/ptmp/rothj/conwell_replication/noise_ceiling/noise_ceiling_ncsnr.csv,otc,rsa
+sub-03,0.796894883955385,7647,560,/ptmp/rothj/conwell_replication/noise_ceiling/noise_ceiling_ncsnr.csv,otc,rsa
+sub-05,0.7935362278408415,6717,560,/ptmp/rothj/conwell_replication/noise_ceiling/noise_ceiling_ncsnr.csv,otc,rsa
+sub-06,0.6357297937526671,6480,560,/ptmp/rothj/conwell_replication/noise_ceiling/noise_ceiling_ncsnr.csv,otc,rsa
+sub-07,0.7456675506495962,6470,560,/ptmp/rothj/conwell_replication/noise_ceiling/noise_ceiling_ncsnr.csv,otc,rsa

@@ -1,0 +1,13 @@
+subject,eval_type,score_set,n_rows,n_nan,n_models
+sub-01,crsa,test,23443,0,117
+sub-01,crsa,train,23443,0,117
+sub-01,srpr,test,23443,0,117
+sub-01,srpr,train,23443,0,117
+sub-01,wrsa,test,23443,0,117
+sub-01,wrsa,train,23443,0,117
+sub-03,crsa,test,24822,0,117
+sub-03,crsa,train,24822,0,117
+sub-03,srpr,test,24822,0,117
+sub-03,srpr,train,24822,0,117
+sub-03,wrsa,test,24822,0,117
+sub-03,wrsa,train,24822,0,117

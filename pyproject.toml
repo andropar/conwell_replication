@@ -18,7 +18,7 @@ dependencies = [
     "numpy",
     "pandas",
     "scipy",
-    "scikit-learn",
+    "scikit-learn<1.6",  # vendored DeepNSD ridge_gcv_mod.py uses _validate_data + _RidgeGCV internals removed in 1.6
     "h5py",
     "tqdm",
     "joblib",
@@ -75,12 +75,14 @@ dev = ["pytest", "ruff", "ipython"]
 [project.scripts]
 conwell-extract        = "conwell_replication.extract.extract_features:main"
 conwell-eval-splithalf = "conwell_replication.eval.rsa_splithalf:main"
+conwell-eval-splithalf-streamed = "conwell_replication.eval.rsa_splithalf_streamed:main"
 conwell-eval-min-nn    = "conwell_replication.eval.rsa_min_nn:main"
 conwell-noise-ceiling  = "conwell_replication.eval.noise_ceiling:main"
 conwell-prepare-scores = "conwell_replication.analysis.prepare_scores:main"
 conwell-stats          = "conwell_replication.analysis.statistical_tests:cli"
 conwell-figures        = "conwell_replication.figures.plot_figures:cli"
 conwell-build-pool     = "conwell_replication.data.stimuli:main"
+conwell-cache-brain    = "conwell_replication.data.brain_cache:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

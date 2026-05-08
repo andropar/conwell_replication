@@ -48,16 +48,33 @@ src/conwell_replication/
 
 resources/
   conwell_model_list.csv   335-model trained subset of DeepNSD's registry
+  conwell_model_list_replication.csv
+                           controlled-comparison subset used for current
+                           Fig. 2-4 replication outputs
+  model_contrasts.csv      comparison metadata for controlled model contrasts
   model_metadata.csv       Per-model comparison-group metadata (from the
                            prior 413-model replication)
   weights/README.md        Notes on transferring SLIP / other heavy weights
+  archive/                 superseded or smoke-test manifests
 
 # Splits live upstream — pulled in via the `laion-fmri` dep declared in
 # pyproject.toml. See https://github.com/ViCCo-Group/LAION-fMRI
 
 configs/             hydra YAMLs
-scripts/             helper shell scripts
+scripts/             reusable helper scripts; archived cluster/provenance
+                     scripts live under scripts/archive/
 ```
+
+## Shareable snapshot
+
+This repo is meant to be shared as a lightweight replication snapshot. Keep the
+source code, configs, scripts, model manifests, `features/*.csv` stimulus-pool
+manifests, `figures/` result tables/plots, `reports/` summaries, and
+`METHODS.md`. Do not commit the raw LAION-fMRI data, stimulus JPG tree,
+extracted feature HDF5 files, intermediate arrays, or model checkpoints.
+
+For completed output tables and replotting entry points, see
+[RESULTS.md](RESULTS.md).
 
 ## Install (new server)
 

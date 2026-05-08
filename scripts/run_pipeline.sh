@@ -3,8 +3,8 @@
 #
 # Assumes:
 #   * laion_fmri data is downloaded and reachable via $LAION_FMRI_ROOT
-#   * deepjuice + the conwell_replication package itself are pip-installed
-#   * resources/weights/resnet50_barlowtwins.pth has been copied in
+#   * the conwell_replication package itself is pip-installed
+#   * model weights that cannot be downloaded automatically have been copied in
 #
 # Run as `bash scripts/run_pipeline.sh [--skip-extract] [--mode {min_nn|splithalf|both}]`.
 
@@ -15,6 +15,7 @@ cd "$(dirname "$0")/.."
 MODE="both"
 SKIP_EXTRACT=0
 GPUS="0"
+MODELS_CSV="${MODELS_CSV:-resources/conwell_model_list_replication.csv}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -33,11 +34,11 @@ if [[ ! -f features/stimulus_pool.csv ]]; then
         --output features/stimulus_pool.csv
 fi
 
-# 2. Feature extraction (152 models × ~24k images) -----------------------
+# 2. Feature extraction for the current controlled-replication model subset ---
 if [[ "$SKIP_EXTRACT" -eq 0 ]]; then
     echo "Extracting features on GPU $GPUS..."
     CUDA_VISIBLE_DEVICES="$GPUS" python -m conwell_replication.extract.extract_features \
-        --models resources/curated_model_list.csv \
+        --models "$MODELS_CSV" \
         --pool   features/stimulus_pool.csv \
         --out    features/ 2>&1 | tee logs/extract.log
 fi

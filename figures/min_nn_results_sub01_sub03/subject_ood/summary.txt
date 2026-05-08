@@ -1,0 +1,29 @@
+Conwell odd/even split-half controlled-comparison summary
+
+Result files: 236
+Rows: 289,590
+Subjects: sub-01, sub-03
+Models: 117
+NaN score rows: 0
+Duplicate raw score keys averaged before selection: 0
+Controlled contrast file: /viper/u1/rothj/conwell_replication/resources/model_contrasts.csv
+Noise ceiling: mean r=0.7830, range=[0.7691, 0.7969], source=/ptmp/rothj/conwell_replication/noise_ceiling/noise_ceiling_ncsnr_sub01_sub03.csv
+
+Controlled model coverage:
+                         comparison  models_in_deepnsd_contrast  models_in_results
+              Fig2 architecture CNN                          34                 33
+      Fig2 architecture Transformer                          21                 21
+                    Fig3A Taskonomy                          25                 25
+Fig3B SSL plus supervised reference                          11                 11
+                         Fig3C SLIP                           9                  9
+               Fig4A ImageNet input                          24                 24
+                         Fig4B IPCL                           4                  4
+
+Selected-layer test score summary by metric:
+eval_type   n  n_nan   mean median    std    sem
+     crsa 234      0 0.1165 0.1018 0.1199 0.0078
+     wrsa 234      0 0.2990 0.3021 0.0990 0.0065
+     srpr 234      0 0.3450 0.3615 0.0781 0.0051
+
+Coverage caveats:
+- Fig2 architecture CNN: missing 1 models, e.g. efficientnet_b1_classification

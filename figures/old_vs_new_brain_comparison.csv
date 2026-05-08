@@ -1,0 +1,4 @@
+subject,image_subset,n_images,n_voxels_old_total,n_voxels_old_hlvis,n_voxels_new_total,n_voxels_new_otc,n_voxels_new_otc_ncsnr,rdm_correlation
+sub-01,all,1492,257594,5056,8564,8564,6662,0.36529020922221617
+sub-01,non_ood,1121,257594,5056,8564,8564,6662,0.430723650241052
+sub-01,ood_only,371,257594,5056,8564,8564,6662,0.3033490543643048

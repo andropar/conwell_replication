@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import shutil
 import sys
 import traceback
 from datetime import datetime
@@ -59,12 +58,15 @@ from tqdm import tqdm
 
 # Importing _vendor primes sys.path so model_opts.* is importable.
 from conwell_replication import _vendor  # noqa: F401
-from model_opts.feature_extraction import get_all_feature_maps, get_empty_feature_maps
-from model_opts.feature_reduction import get_feature_map_srps
+from model_opts.feature_extraction import (
+    get_empty_feature_maps,
+    get_feature_maps,
+)
 from model_opts.model_options import (
     get_model_options,
     get_recommended_transforms,
 )
+from sklearn.random_projection import SparseRandomProjection
 
 
 # ---------------------------------------------------------------------------
@@ -140,131 +142,208 @@ def load_model(option_key: str, model_options: dict) -> torch.nn.Module:
 # ---------------------------------------------------------------------------
 # Hook-based extraction + SRP for one model
 # ---------------------------------------------------------------------------
-def extract_and_reduce(
+def extract_and_reduce_to_h5(
+    out_path: Path,
+    option_key: str,
     model: torch.nn.Module,
     transform,
-    images: List[Image.Image],
+    image_paths: List[str],
+    image_ids: List[str],
     batch_size: int,
     target_n_layers: int,
     device: str,
-    temp_dir: Path,
-    srp_eps: float = 0.1,
+    n_projections: int = 5960,
     srp_seed: int = 0,
-) -> Dict[str, np.ndarray]:
-    # Pre-transform once. DeepNSD's get_all_feature_maps expects
-    # batch.cuda()-able tensors out of the DataLoader.
-    pre = [transform(img) for img in images]
-    stacked = torch.stack(pre)
+    num_workers: int = 4,
+):
+    """Stream feature extraction → SRP → HDF5 dataset slice writes.
 
-    class _RawTensorDataset(torch.utils.data.Dataset):
-        def __init__(self, tensor): self.tensor = tensor
-        def __len__(self): return self.tensor.shape[0]
-        def __getitem__(self, idx): return self.tensor[idx]
+    Memory bound is ``batch_size * max(n_features_per_layer)`` plus a small
+    constant per layer (the fitted ``SparseRandomProjection`` matrix and the
+    open HDF5 dataset handle). Reduced features are written directly into
+    ``features_srp/<safe_layer>[start:start+batch]`` and never accumulated
+    in CPU RAM as a list.
+
+    SRP target dim defaults to **5960**, matching Conwell et al. (2024)'s
+    fixed projection (Johnson-Lindenstrauss bound for n=1000 NSD probe
+    images, eps=0.1). The projector for each layer is instantiated and fit
+    on the first batch that produces a non-None output for that layer; with
+    explicit ``n_components`` and fixed ``random_state`` the projection
+    matrix is deterministic and depends only on ``n_features`` and the
+    seed, so per-batch fits are equivalent to a single full-dataset fit.
+
+    Image loading is lazy: paths are opened + transformed on demand inside
+    DataLoader workers, so the ~19 GB cost of pre-decoding 24,681 RGB
+    pixel buffers is never paid.
+    """
+    n_samples = len(image_paths)
+    if n_samples == 0:
+        raise ValueError("image_paths is empty")
+    if len(image_ids) != n_samples:
+        raise ValueError(
+            f"image_ids length ({len(image_ids)}) != image_paths "
+            f"length ({n_samples})"
+        )
+
+    class _LazyImagesDataset(torch.utils.data.Dataset):
+        def __init__(self, paths, tfm):
+            self.paths = paths
+            self.tfm = tfm
+        def __len__(self):
+            return len(self.paths)
+        def __getitem__(self, idx):
+            with Image.open(self.paths[idx]) as img:
+                return self.tfm(img.convert("RGB"))
 
     dataloader = torch.utils.data.DataLoader(
-        _RawTensorDataset(stacked), batch_size=batch_size, shuffle=False,
+        _LazyImagesDataset(image_paths, transform),
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=False,
+        persistent_workers=False,
     )
 
     model = model.to(device)
 
-    # 1. Discover layer names without running data through (uses input_shape)
+    # 1. Discover layer names with a synthetic 1-image forward pass.
+    with Image.open(image_paths[0]) as _img0:
+        sample = transform(_img0.convert("RGB"))
+    input_shape = tuple(sample.shape)
+    del sample
     _log("  Discovering layer names...")
-    input_shape = pre[0].shape  # (C, H, W)
     all_layer_names = get_empty_feature_maps(
         model, inputs=None, input_shape=input_shape,
         remove_duplicates=True, names_only=True,
     )
     _log(f"  Total layers: {len(all_layer_names)}")
 
-    # 2. Select target layers
     selected = select_layers(all_layer_names, target=target_n_layers)
     _log(f"  Selected {len(selected)} of {len(all_layer_names)} layers:")
     for ln in selected:
         _log(f"    - {ln}")
+    selected_set = set(selected)
 
-    # 3. Extract via hooks
-    _log("  Extracting features (hook-based)...")
-    feature_maps = get_all_feature_maps(
-        model,
-        dataloader,
-        layers_to_retain=selected,
-        remove_duplicates=True,
-        flatten=True,
-        numpy=True,
-        use_tqdm=True,
+    _log(
+        f"  SRP target dim: {n_projections} "
+        f"(Conwell-fixed, JL bound for n=1000 probe at eps=0.1)"
     )
 
-    # Free the model
-    model = model.cpu()
-    del model
-    gc.collect()
-    if device.startswith("cuda"):
-        torch.cuda.empty_cache()
+    # 2. Open output HDF5 and stream batch-by-batch into datasets.
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".partial")
 
-    if not feature_maps:
-        return {}
+    srp_per_layer: Dict[str, SparseRandomProjection] = {}
+    h5_dset_per_layer: Dict[str, h5py.Dataset] = {}
+    layer_order: List[str] = []
+    write_idx = 0
 
-    # 4. SRP per layer
-    _log(f"  Applying SRP to {len(feature_maps)} layers...")
-    srp_dict: Dict[str, np.ndarray] = {}
-    for layer_name, feats in tqdm(feature_maps.items(), desc="  SRP", leave=False):
-        layer_temp = temp_dir / layer_name.replace("/", "_")
-        layer_temp.mkdir(parents=True, exist_ok=True)
-        try:
-            reduced = get_feature_map_srps(
-                {"layer": feats},
-                n_projections=None,
-                upsampling=True,
-                eps=srp_eps,
-                seed=srp_seed,
-                save_outputs=True,
-                output_dir=str(layer_temp),
-                delete_saved_outputs=True,
-                delete_originals=False,
-            )["layer"]
-            srp_dict[layer_name] = reduced.astype(np.float32, copy=False)
-            _log(f"    {layer_name}: {feats.shape} -> {reduced.shape}")
-        except Exception as e:
-            _log(f"    SRP failed for {layer_name}: {e}")
-        finally:
-            shutil.rmtree(layer_temp, ignore_errors=True)
+    h5_chunk_rows = min(batch_size, n_samples)
 
-    del feature_maps
-    gc.collect()
-    return srp_dict
+    try:
+        with h5py.File(tmp_path, "w") as f:
+            f.attrs["model_name"] = option_key
+            f.attrs["n_images"] = n_samples
+            f.attrs["extraction_time"] = datetime.now().isoformat()
+            f.attrs["extractor"] = "deepnsd_hooks"
+            f.attrs["srp_n_projections"] = n_projections
+            f.attrs["srp_seed"] = srp_seed
 
+            dt = h5py.string_dtype(encoding="utf-8")
+            f.create_dataset(
+                "image_ids",
+                data=np.array(image_ids, dtype=object),
+                dtype=dt,
+            )
+            grp = f.create_group("features_srp")
 
-# ---------------------------------------------------------------------------
-# h5 writing (image_id-indexed)
-# ---------------------------------------------------------------------------
-def write_h5(
-    output_path: Path,
-    option_key: str,
-    image_ids: List[str],
-    srp: Dict[str, np.ndarray],
-):
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(output_path, "w") as f:
-        f.attrs["model_name"] = option_key
-        f.attrs["n_layers"] = len(srp)
-        f.attrs["layer_names"] = list(srp.keys())
-        f.attrs["n_images"] = len(image_ids)
-        f.attrs["extraction_time"] = datetime.now().isoformat()
-        f.attrs["extractor"] = "deepnsd_hooks"
+            _log("  Extracting features (streaming SRP → HDF5)...")
+            pbar = tqdm(dataloader, desc="Feature Extraction (Batch)")
+            for batch in pbar:
+                batch = batch.to(device, non_blocking=True)
+                with torch.no_grad():
+                    batch_maps = get_feature_maps(
+                        model, batch,
+                        layers_to_retain=selected,
+                        remove_duplicates=False,
+                        enforce_input_shape=True,
+                    )
+                del batch
 
-        dt = h5py.string_dtype(encoding="utf-8")
-        f.create_dataset("image_ids", data=np.array(image_ids, dtype=object), dtype=dt)
+                batch_n = None
+                for layer_name in selected:
+                    feats = batch_maps.get(layer_name)
+                    if feats is None:
+                        continue
+                    feats_np = feats.reshape(feats.shape[0], -1).numpy()
+                    if batch_n is None:
+                        batch_n = feats_np.shape[0]
 
-        grp = f.create_group("features_srp")
-        for name, data in srp.items():
-            safe = name.replace("/", "_").replace(".", "_")
-            grp.create_dataset(safe, data=data, compression="gzip", compression_opts=4)
+                    if layer_name not in srp_per_layer:
+                        srp = SparseRandomProjection(
+                            n_components=n_projections,
+                            random_state=srp_seed,
+                            dense_output=True,
+                        )
+                        srp.fit(feats_np)
+                        srp_per_layer[layer_name] = srp
+                        safe = layer_name.replace("/", "_").replace(".", "_")
+                        dset = grp.create_dataset(
+                            safe,
+                            shape=(n_samples, n_projections),
+                            dtype="float32",
+                            chunks=(h5_chunk_rows, n_projections),
+                            compression="gzip",
+                            compression_opts=4,
+                        )
+                        dset.attrs["layer_name"] = layer_name
+                        h5_dset_per_layer[layer_name] = dset
+                        layer_order.append(layer_name)
+
+                    reduced = srp_per_layer[layer_name].transform(feats_np)
+                    h5_dset_per_layer[layer_name][
+                        write_idx:write_idx + batch_n, :
+                    ] = np.asarray(reduced, dtype=np.float32)
+
+                del batch_maps
+                if batch_n is not None:
+                    write_idx += batch_n
+            pbar.close()
+
+            f.attrs["n_layers"] = len(layer_order)
+            f.attrs["layer_names"] = layer_order
+
+        if write_idx != n_samples:
+            _log(
+                f"  WARNING: wrote {write_idx} rows but expected {n_samples}"
+            )
+        tmp_path.replace(out_path)
+
+    finally:
+        # Drop GPU model + caches regardless of success
+        model = model.cpu()
+        del model
+        gc.collect()
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()
+        # Clean up any partial file from a crashed run
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+    _log(f"  wrote {len(layer_order)} layer datasets, n_proj={n_projections}")
 
 
 # ---------------------------------------------------------------------------
 # Image loading from union-pool CSV
 # ---------------------------------------------------------------------------
 def load_image_list(pool_csv: Path, images_root: Optional[Path]) -> tuple:
+    """Return (image_ids, image_paths). Images are NOT pre-decoded — opening
+    happens lazily inside the per-task DataLoader so we don't carry ~19 GB
+    of decoded RGB pixel buffers in CPU memory for the union pool.
+    """
     df = pd.read_csv(pool_csv).sort_values("union_index", kind="stable").reset_index(drop=True)
     if "image_path" in df.columns:
         paths = df["image_path"].tolist()
@@ -276,9 +355,8 @@ def load_image_list(pool_csv: Path, images_root: Optional[Path]) -> tuple:
             "provided. Either add image_path to the pool CSV or pass "
             "--images-root /path/to/images."
         )
-    _log(f"Loading {len(paths)} images from {pool_csv}...")
-    images = [Image.open(p).convert("RGB") for p in tqdm(paths, desc="open images")]
-    return df["image_id"].tolist(), images
+    _log(f"Resolved {len(paths)} image paths from {pool_csv} (lazy loading)")
+    return df["image_id"].tolist(), paths
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +383,12 @@ def parse_args(argv: Optional[list] = None):
                     help="Restrict to specific model_source values (e.g. timm torchvision).")
     ap.add_argument("--target-n-layers", type=int, default=10)
     ap.add_argument("--batch-size", type=int, default=64)
-    ap.add_argument("--srp-eps", type=float, default=0.1)
+    ap.add_argument("--num-workers", type=int, default=4,
+                    help="DataLoader workers for parallel JPEG decode + transform.")
+    ap.add_argument("--n-projections", type=int, default=5960,
+                    help="SRP target dimensions. Default 5960 matches Conwell "
+                         "et al. (2024) — JL bound for n=1000 NSD probe images "
+                         "at eps=0.1, then frozen across all datasets.")
     ap.add_argument("--srp-seed", type=int, default=0)
     ap.add_argument("--force", action="store_true",
                     help="Re-extract even if output already exists.")
@@ -339,7 +422,6 @@ def main(argv: Optional[list] = None) -> int:
     _log(f"Processing {len(model_list)} models")
 
     args.out.mkdir(parents=True, exist_ok=True)
-    temp_dir = args.out / "temp_srp_deepnsd"
 
     if args.dry_run:
         _log("\n=== DRY RUN ===")
@@ -359,7 +441,7 @@ def main(argv: Optional[list] = None) -> int:
     model_options = get_model_options()
     _log(f"  registry size: {len(model_options)}")
 
-    image_ids, images = load_image_list(args.pool, args.images_root)
+    image_ids, image_paths = load_image_list(args.pool, args.images_root)
 
     successes = 0
     skips = 0
@@ -383,33 +465,27 @@ def main(argv: Optional[list] = None) -> int:
             failures.append((option_key, "not in registry"))
             continue
 
-        model_temp = temp_dir / option_key.replace("/", "-")
         try:
             _log("  Loading model...")
             model = load_model(option_key, model_options)
 
             transform = get_recommended_transforms(option_key, input_type="PIL")
 
-            model_temp.mkdir(parents=True, exist_ok=True)
-            srp_dict = extract_and_reduce(
+            extract_and_reduce_to_h5(
+                out_path=out_path,
+                option_key=option_key,
                 model=model,
                 transform=transform,
-                images=images,
+                image_paths=image_paths,
+                image_ids=image_ids,
                 batch_size=args.batch_size,
                 target_n_layers=args.target_n_layers,
                 device=device,
-                temp_dir=model_temp,
-                srp_eps=args.srp_eps,
+                n_projections=args.n_projections,
                 srp_seed=args.srp_seed,
+                num_workers=args.num_workers,
             )
-
-            if not srp_dict:
-                _log("  ERROR: no features extracted")
-                failures.append((option_key, "no features"))
-                continue
-
-            write_h5(out_path, option_key, image_ids, srp_dict)
-            _log(f"  SAVED {h5_name} ({len(srp_dict)} layers)")
+            _log(f"  SAVED {h5_name}")
             successes += 1
 
         except Exception as e:
@@ -420,7 +496,6 @@ def main(argv: Optional[list] = None) -> int:
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            shutil.rmtree(model_temp, ignore_errors=True)
 
     _log(f"\n{'='*60}\nSummary: {successes} ok / {skips} skipped / {len(failures)} failed")
     if failures:

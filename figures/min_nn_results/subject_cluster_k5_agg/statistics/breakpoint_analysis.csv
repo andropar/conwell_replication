@@ -1,0 +1,2 @@
+breakpoint_1_rank,breakpoint_1_score,breakpoint_2_rank,breakpoint_2_score,n_models_top_segment,n_models_middle_segment,n_models_bottom_segment,sse,metric,n_models,top_model,top_score,method,ci_method
+79,0.3517485809326172,107,0.2016326668858528,79,28,10,0.006287652190159355,wrsa,117,ResNet50/BarlowTwins/BS2048_selfsupervised,0.4486710798740387,pure_python_grid_search_two_breakpoints,not_computed

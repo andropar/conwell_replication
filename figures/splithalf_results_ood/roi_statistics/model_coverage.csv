@@ -1,0 +1,39 @@
+comparison_id,comparison,level,models_in_contrast,models_in_scores,missing_models,n_missing
+architecture,CNNs versus Transformers,Convolutional,34,33,efficientnet_b1_classification,1
+architecture,CNNs versus Transformers,Transformer,21,21,,0
+taskonomy_tasks,Taskonomy Encoders,autoencoding,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,class_object,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,class_scene,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,curvature,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,denoising,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,depth_euclidean,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,depth_zbuffer,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,edge_occlusion,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,edge_texture,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,egomotion,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,fixated_pose,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,inpainting,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,jigsaw,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,keypoints2d,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,keypoints3d,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,nonfixated_pose,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,normal,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,point_matching,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,random_weights,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,reshading,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,room_layout,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,segment_semantic,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,segment_unsup25d,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,segment_unsup2d,1,1,,0
+taskonomy_tasks,Taskonomy Encoders,vanishing_point,1,1,,0
+contrastive_self_supervised,Contrastive Self-Supervised Learning,Contrastive,6,6,,0
+contrastive_self_supervised,Contrastive Self-Supervised Learning,Non-Contrastive,4,4,,0
+language_alignment,Language Alignment,CLIP,3,3,,0
+language_alignment,Language Alignment,SLIP,3,3,,0
+language_alignment,Language Alignment,SimCLR,3,3,,0
+imagenet_size,ImageNet1K versus ImageNet21K,imagenet,12,12,,0
+imagenet_size,ImageNet1K versus ImageNet21K,imagenet21k,12,12,,0
+objects_faces_places,"Objects, Faces, Places",imagenet,1,1,,0
+objects_faces_places,"Objects, Faces, Places",openimages,1,1,,0
+objects_faces_places,"Objects, Faces, Places",places256,1,1,,0
+objects_faces_places,"Objects, Faces, Places",vggface2,1,1,,0

@@ -1,0 +1,8 @@
+comparison,models_in_deepnsd_contrast,models_in_results
+Fig2 architecture CNN,34,33
+Fig2 architecture Transformer,21,21
+Fig3A Taskonomy,25,25
+Fig3B SSL plus supervised reference,11,11
+Fig3C SLIP,9,9
+Fig4A ImageNet input,24,24
+Fig4B IPCL,4,4

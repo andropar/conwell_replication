@@ -1,0 +1,2 @@
+breakpoint_1_rank,breakpoint_1_score,breakpoint_2_rank,breakpoint_2_score,n_models_top_segment,n_models_middle_segment,n_models_bottom_segment,sse,metric,n_models,top_model,top_score,method,ci_method
+11,0.32575114369392394,105,0.14902504831552504,11,94,12,0.008953629237480689,wrsa,117,alexnet_gn_ipcl_vggface2,0.48647719621658325,pure_python_grid_search_two_breakpoints,not_computed
