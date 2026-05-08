@@ -1,6 +1,6 @@
 # LAION-fMRI Conwell Fig. 2-4 Replication Report
 
-This report summarizes the completed OTC analyses for the Conwell-style controlled comparisons: architecture variation (Fig. 2), task variation (Fig. 3), and input-diet variation (Fig. 4). The internal metric named `wrsa` is the voxel-encoding RSA metric corresponding most closely to Conwell's veRSA, so it is labeled here as wRSA/veRSA.
+This report summarizes the completed OTC analyses for the Conwell-style controlled comparisons: architecture variation (Fig. 2), task variation (Fig. 3), and input-diet variation (Fig. 4). The code column `wrsa` is the voxel-encoding RSA metric corresponding most closely to Conwell's veRSA, so it is labeled here as wRSA/veRSA.
 
 The LAION-fMRI analyses use 5 subjects and 117 plotted models after dropping the known `efficientnet_b1_classification` coverage issue. Conwell's paper used the NSD shared-image setting with 4 subjects and a larger model survey, so the most important comparison is the direction and relative size of controlled effects rather than exact equality of absolute scores.
 

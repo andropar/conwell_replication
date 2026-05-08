@@ -72,8 +72,7 @@ The matching already-rendered Conwell-style plots are in the same directories:
 
 ## Recreating From Raw Evaluation Shards
 
-The raw evaluation shards are not stored in Git when they are large parquet/HDF5
-intermediates. To regenerate plots from a completed local evaluation directory,
-use the package commands in `README.md` or the helper scripts in `scripts/`.
-The top-level `figures/` and `reports/` CSVs are the shareable replotting
-snapshot.
+Large parquet/HDF5 intermediates are not committed. To regenerate plots from a
+completed local evaluation directory, use the package commands in `README.md`
+or the helper scripts in `scripts/`. The committed `figures/` and `reports/`
+CSVs are the replotting tables included with this repository.

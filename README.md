@@ -1,221 +1,185 @@
 # conwell_replication
 
-Replication of [Conwell et al. (2024)](https://doi.org/10.1038/s41467-024-53972-1)
+Replication analyses for [Conwell et al. (2024)](https://doi.org/10.1038/s41467-024-53972-1)
 on the [LAION-fMRI](https://laion-fmri.hebartlab.com/laion_fmri_package/index.html)
-dataset, using **Conwell's DeepNSD extraction protocol** end-to-end:
+dataset.
 
-- DeepNSD's call-string registry to load each model
-  (`model_opts.model_options.get_model_options`).
-- DeepNSD's `get_recommended_transforms(option_key, input_type="PIL")` for
-  preprocessing per model.
-- Hook-based feature extraction
-  (`model_opts.feature_extraction.get_all_feature_maps`) — same `ModuleType-N`
-  layer naming as the paper.
-- SRP reduction with `eps=0.1`.
+The code follows the DeepNSD feature-extraction protocol used by Conwell et al.:
 
-The DeepNSD source is **vendored** at
-[src/conwell_replication/_vendor/deepnsd/](src/conwell_replication/_vendor/deepnsd/);
-no separate DeepNSD checkout is required on the new server. The 31 GB of
-SLIP `.pt` weights are gitignored — see [resources/weights/README.md](resources/weights/README.md)
-for the manual transfer step.
+- DeepNSD model loading through `model_opts.model_options.get_model_options`.
+- Model-specific preprocessing via `get_recommended_transforms`.
+- Hook-based feature extraction with DeepNSD-style `ModuleType-N` layer names.
+- Sparse random projection feature reduction.
 
-Two evaluation modes:
+The required DeepNSD source files are vendored under
+`src/conwell_replication/_vendor/deepnsd/`. Large model checkpoints and raw
+data are not committed.
 
-1. **Split-half** (Conwell-style): even/odd split of the shared-stimulus
-   subset. Used as a sanity gate against
-   `experiments/ccn2025_continuation/rsa_large_scale_benchmark/results/rsa_20260223_154344/`.
-2. **Generalization splits** via [`laion_fmri.splits`](https://github.com/ViCCo-Group/LAION-fMRI):
-   the 11 train/test splits per pool from the upstream dataloader (5
-   `random_*` baselines, 5 `cluster_k5_*` cluster-holdout folds, 1 `tau`
-   MMD-matched 80/20 split). Available for the cross-subject `shared`
-   pool (1,121 images) or any per-subject pool (5,833 images).
+## Repository Layout
 
-Models: DeepNSD's **335 trained models** (the 489-model registry filtered to
-`train_type != "random"`). Defined in
-[resources/conwell_model_list.csv](resources/conwell_model_list.csv).
-
-## Layout
-
-```
+```text
 src/conwell_replication/
-  data/              LAIONBenchmark adapter, split loading, stimuli pool
-  extract/           Feature extraction (DeepNSD protocol over union pool)
-  eval/              RSA evaluators (split-half, min_nn) + noise ceiling
-  analysis/          Best-layer selection, statistical tests
-  figures/           Replication of fig1/fig2/fig3 + min_nn variants
-  _vendor/
-    deepnsd/         Conwell's pressures/model_opts tree (vendored)
+  data/              LAION-fMRI adapter, ROI masks, stimulus-pool construction
+  extract/           DeepNSD-protocol feature extraction
+  eval/              split-half and min-nn RSA evaluators
+  analysis/          best-layer selection and statistical tests
+  figures/           plotting code
+  _vendor/deepnsd/   vendored DeepNSD model-loading utilities
 
-resources/
-  conwell_model_list.csv   335-model trained subset of DeepNSD's registry
-  conwell_model_list_replication.csv
-                           controlled-comparison subset used for current
-                           Fig. 2-4 replication outputs
-  model_contrasts.csv      comparison metadata for controlled model contrasts
-  model_metadata.csv       Per-model comparison-group metadata (from the
-                           prior 413-model replication)
-  weights/README.md        Notes on transferring SLIP / other heavy weights
-  archive/                 superseded or smoke-test manifests
-
-# Splits live upstream — pulled in via the `laion-fmri` dep declared in
-# pyproject.toml. See https://github.com/ViCCo-Group/LAION-fMRI
-
-configs/             hydra YAMLs
-scripts/             reusable helper scripts; archived cluster/provenance
-                     scripts live under scripts/archive/
+configs/             example extraction/evaluation configs
+features/            lightweight stimulus-pool CSV manifests
+figures/             result tables, diagnostics, and rendered analysis figures
+reports/             report-level summary tables and figures
+resources/           model manifests, comparison metadata, and weight notes
+scripts/             reusable helper scripts
 ```
 
-## Shareable snapshot
-
-This repo is meant to be shared as a lightweight replication snapshot. Keep the
-source code, configs, scripts, model manifests, `features/*.csv` stimulus-pool
-manifests, `figures/` result tables/plots, `reports/` summaries, and
-`METHODS.md`. Do not commit the raw LAION-fMRI data, stimulus JPG tree,
-extracted feature HDF5 files, intermediate arrays, or model checkpoints.
+Archived run launchers and legacy manifests are kept under `scripts/archive/`
+and `resources/archive/`.
 
 For completed output tables and replotting entry points, see
-[RESULTS.md](RESULTS.md).
+[RESULTS.md](RESULTS.md). For methodological details, see [METHODS.md](METHODS.md).
 
-## Install (new server)
+## Installation
 
 ```bash
-git clone git@github.com:andropar/conwell_replication.git
+git clone <repo-url>
 cd conwell_replication
 
-# Editable install. Pulls in core deps (torch/torchvision/timm/transformers
-# plus the analysis stack). Extras for specific model_sources are gated:
-pip install -e .                  # core only
-pip install -e .[clip,openclip,vissl]   # the most-used extras
-pip install -e .[full]            # everything (heavy: detectron2, tensorflow, ...)
-
-# `laion-fmri` (data downloader + bundled train/test splits) is already
-# declared as a dep, so it installs automatically with `-e .` above.
-
-# Plus the SLIP weights (~31 GB) — see resources/weights/README.md
+pip install -e .
 ```
 
-## Data layout (assumed on new server)
+Optional dependencies are grouped by model source:
 
-### Brain data
-
-Download via the `laion_fmri` package:
-
-```python
-from laion_fmri import dataset_initialize, set_aws_credentials, download
-dataset_initialize("/path/to/laion_fmri_data")
-set_aws_credentials(...)
-for sub in ("sub-01", "sub-03", "sub-05", "sub-06", "sub-07"):
-    download(subject=sub, n_jobs=8)
+```bash
+pip install -e '.[clip,openclip,vissl]'
+pip install -e '.[full]'
 ```
 
-Set the env var so the LAIONBenchmark adapter can find it:
+`.[full]` installs heavier dependencies such as detectron2, TensorFlow, and
+VQGAN-related packages. Install only the extras needed for the model sources
+you plan to extract.
+
+## Data Requirements
+
+Set `LAION_FMRI_ROOT` to a local LAION-fMRI dataset directory:
 
 ```bash
 export LAION_FMRI_ROOT=/path/to/laion_fmri_data
 ```
 
-### Stimulus images — rsync from iris (no AWS download needed)
+Brain data can be downloaded through the `laion_fmri` package:
 
-The 24,681 union-pool stimuli already exist as JPGs on iris.cbs.mpg.de.
-Total ~4.3 GB — rsync directly from there:
+```python
+from laion_fmri import dataset_initialize, set_aws_credentials, download
 
-```bash
-# From an MPCDF Viper login node (assumes ssh access to iris is set up):
-rsync -avhP jroth@iris.cbs.mpg.de:/SSD/jroth/deepvision_fmri/cache/image_sets/ \
-    $WORK/conwell_replication/stimuli/image_sets/
+dataset_initialize("/path/to/laion_fmri_data")
+set_aws_credentials(...)
+
+for subject in ("sub-01", "sub-03", "sub-05", "sub-06", "sub-07"):
+    download(subject=subject, n_jobs=8)
 ```
 
-That gives you the full directory structure the build-pool resolver expects:
+The feature extractor also needs local stimulus images. The build-pool step
+expects an image tree with the LAION-fMRI shared and subject-specific stimulus
+directories:
 
-```
+```text
 image_sets/
-├── deepvision_shared/                   1492 jpgs (every shared_*.jpg)
-├── deepvision_unique_sub-01/            4712 jpgs (filenames end _p01.jpg)
-├── deepvision_unique_sub-03/            4712 jpgs (filenames end _p04.jpg !)
-├── deepvision_unique_sub-05/            4712 jpgs (filenames end _p03.jpg)
-├── deepvision_unique_sub-06/            4712 jpgs (filenames end _p02.jpg !)
-└── deepvision_unique_sub-07/            4712 jpgs (filenames end _p05.jpg)
+  deepvision_shared/
+  deepvision_unique_sub-01/
+  deepvision_unique_sub-03/
+  deepvision_unique_sub-05/
+  deepvision_unique_sub-06/
+  deepvision_unique_sub-07/
 ```
 
-### Subject IDs
+Pass that directory with `--stimuli-root` when constructing the stimulus-pool
+manifest. The committed `features/stimulus_pool.csv` is a lightweight manifest;
+the image files themselves are not included.
 
-The benchmark, evaluators and splits all use the same BIDS-style subject
-IDs as `laion_fmri`: `sub-01`, `sub-03`, `sub-05`, `sub-06`, `sub-07`.
-The `laion_fmri.splits` upstream package handles the per-subject pool
-indexing internally (no participant-code abstraction is exposed to user
-code anymore).
+Some DeepNSD models require checkpoint files that are too large for Git. See
+[resources/weights/README.md](resources/weights/README.md) for the expected
+SLIP checkpoint filenames and destination path.
 
-The only place the old participant codes still surface is in stimulus
-*filenames* under `deepvision_unique_<sub>/`: filenames carry whichever
-participant code the source HDF5 used at acquisition time, which differs
-from the BIDS subject id for sub-03 ↔ sub-06. The unique-cache resolver
-in [`data/stimuli.py`](src/conwell_replication/data/stimuli.py) handles
-this; nothing downstream of `build-pool` cares.
+## Model Manifests
+
+- `resources/conwell_model_list.csv`: full trained DeepNSD registry used by
+  this project after excluding random-weight models.
+- `resources/conwell_model_list_replication.csv`: controlled-comparison subset
+  used for the current Fig. 2-4 replication outputs.
+- `resources/conwell_model_list_core.csv`: dependency-practical subset for core
+  model sources.
+- `resources/model_contrasts.csv`: metadata for controlled model comparisons.
 
 ## Pipeline
 
+Build the deduplicated stimulus-pool manifest:
+
 ```bash
-# 1. Cache the union of per-subject stimulus pools (deduplicated, ~24k images).
-#    Pass --stimuli-root so the resolved on-disk image paths land in the CSV
-#    (and existence is sanity-checked).
 conwell-build-pool build-pool \
-    --stimuli-root $WORK/conwell_replication/stimuli/image_sets \
-    --output       features/stimulus_pool.csv
-
-# 2. Extract features for the 335-model registry on the union pool
-#    (one .h5 per model, image_id-indexed, SRP-reduced)
-conwell-extract \
-    --models resources/conwell_model_list.csv \
-    --pool   features/stimulus_pool.csv \
-    --out    features/
-
-#    Subset by model_source if desired:
-# conwell-extract --sources timm torchvision openclip ...
-
-# 3. Compute noise ceilings
-conwell-noise-ceiling --mode shared --out results/splithalf/noise_ceilings.csv
-conwell-noise-ceiling --mode min_nn --pool shared \
-    --out results/min_nn_shared/noise_ceilings.csv
-conwell-noise-ceiling --mode min_nn \
-    --out results/min_nn_per_subject/noise_ceilings.csv   # uses each subject's own pool
-
-# 4a. (Sanity) Split-half evaluation on shared-stimulus subset
-conwell-eval-splithalf --features features/ --out results/splithalf/
-
-# 4b. Generalization evaluation on 11 splits.
-#     Pick the pool to match the original study's stimulus scope:
-conwell-eval-min-nn --features features/ --pool shared \
-    --out results/min_nn_shared/
-conwell-eval-min-nn --features features/ \
-    --out results/min_nn_per_subject/   # uses each subject's own pool by default
-
-# 5. Best-layer selection + statistical tests
-for D in results/splithalf results/min_nn; do
-    conwell-prepare-scores \
-        --results       "$D/results_all.parquet" \
-        --noise-ceiling "$D/noise_ceilings.csv" \
-        --out           "$D/"
-    conwell-stats    --results-dir "$D/"
-    conwell-figures  --results-dir "$D/"
-done
+    --stimuli-root /path/to/image_sets \
+    --output features/stimulus_pool.csv
 ```
 
-`scripts/run_pipeline.sh` does the same steps as a single shell entry-point.
+Extract model features:
 
-## Sanity replication
+```bash
+conwell-extract \
+    --models resources/conwell_model_list_replication.csv \
+    --pool features/stimulus_pool.csv \
+    --out features/
+```
 
-Before trusting min_nn numbers, run the split-half evaluator and confirm the
-controlled-comparison effect sizes match
-`experiments/ccn2025_continuation/rsa_large_scale_benchmark/results/rsa_20260223_154344/`
-within tolerance. **Note**: that earlier run used a hybrid extractor
-(deepjuice/FX for the curated 152, DeepNSD-hooks for the rest). The new
-pipeline is uniformly DeepNSD-hooks, so small numerical differences are
-expected on the curated-152 subset; the qualitative effect-size hierarchy
-should match.
+Compute noise ceilings:
 
-## See also
+```bash
+conwell-noise-ceiling \
+    --mode shared \
+    --out results/splithalf/noise_ceilings.csv
 
-- Source replication report:
-  `experiments/ccn2025_continuation/rsa_large_scale_benchmark/results/rsa_20260223_154344/REPLICATION_REPORT.md`
-- min_nn split definitions:
-  `experiments/generalization_split/min_nn/`
+conwell-noise-ceiling \
+    --mode min_nn \
+    --pool shared \
+    --out results/min_nn_shared/noise_ceilings.csv
+```
+
+Run evaluations:
+
+```bash
+conwell-eval-splithalf \
+    --features features/ \
+    --out results/splithalf/
+
+conwell-eval-min-nn \
+    --features features/ \
+    --pool shared \
+    --out results/min_nn_shared/
+```
+
+Prepare summary tables, statistics, and figures:
+
+```bash
+conwell-prepare-scores \
+    --results results/splithalf/results_all.parquet \
+    --noise-ceiling results/splithalf/noise_ceilings.csv \
+    --out results/splithalf/
+
+conwell-stats --results-dir results/splithalf/
+conwell-figures --results-dir results/splithalf/
+```
+
+`scripts/run_pipeline.sh` provides a compact end-to-end launcher for the same
+basic workflow.
+
+## Results
+
+The repository includes lightweight CSV summaries and rendered figures for the
+completed analyses:
+
+- `reports/`: report-level summaries and figures.
+- `figures/splithalf_results/`: split-half result tables and plots.
+- `figures/splithalf_results_ood/`: split-half outputs with OOD images included.
+- `figures/min_nn_results/`: generalization-split result tables and plots.
+
+See [RESULTS.md](RESULTS.md) for the specific files to use when replotting.

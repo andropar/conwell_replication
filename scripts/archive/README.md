@@ -1,15 +1,14 @@
 # Archived Scripts
 
-These scripts record how the completed runs were launched on MPCDF Viper/Raven
-and how intermediate caches were copied or diagnosed. They are intentionally
-not part of the clean top-level workflow.
+These scripts are not part of the main public workflow. They are retained as
+reference material for batch submission, data-transfer helpers, development
+tests, and diagnostics.
 
-Paths inside these files may point to the original machine layout
-(`/ptmp/rothj`, `/u/rothj`, `/raven/...`). Treat them as provenance templates:
-adapt paths and environment names before rerunning them.
+Some files contain site-specific scheduler settings, environment names, or
+filesystem paths. Review and adapt them before running on a different system.
 
-- `cluster/`: SLURM launchers, auto-submit wrappers, rsync jobs, and Viper/Raven
-  environment setup.
-- `diagnostics/`: one-off scripts used to compare old/new brain caches and
-  probe ROI/OOD effects.
-- `smoke_tests/`: early smoke-test and screen-launch helpers.
+- `cluster/`: SLURM launchers, auto-submit wrappers, transfer jobs, and
+  environment setup helpers.
+- `diagnostics/`: one-off scripts used for cache comparisons and ROI/OOD
+  checks.
+- `smoke_tests/`: minimal extraction/download test helpers.

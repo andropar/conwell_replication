@@ -18,5 +18,5 @@ after installing the package and setting the documented environment variables.
 - `build_fig2_4_report.py`: rebuild `reports/laion_fmri_conwell_fig2_4_report.md`
   and its report-level summary figures.
 
-Machine-specific cluster launchers, smoke tests, rsync helpers, and one-off
-diagnostics are kept in `scripts/archive/` for provenance.
+Cluster launchers, development-test helpers, transfer scripts, and one-off
+diagnostics are kept in `scripts/archive/`.

@@ -7,7 +7,7 @@ Active resource files:
 - `conwell_model_list_replication.csv`: smaller model subset used for the
   current controlled Fig. 2-4 replication outputs.
 - `conwell_model_list_core.csv`: dependency-practical extraction subset used
-  for core model sources during the completed cluster run.
+  for core model sources.
 - `model_contrasts.csv`: controlled-comparison metadata for architecture,
   task, self-supervision, SLIP, ImageNet-scale, and IPCL analyses.
 - `model_metadata.csv`: compatibility metadata used by the score-preparation
@@ -15,4 +15,4 @@ Active resource files:
 - `weights/README.md`: notes for out-of-band model weights that are too large
   for Git.
 
-Archived manifests live in `resources/archive/`.
+Legacy and reference manifests live in `resources/archive/`.

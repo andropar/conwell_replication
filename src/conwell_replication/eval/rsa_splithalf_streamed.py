@@ -202,13 +202,43 @@ def _load_contexts(
     return contexts
 
 
-def _image_paths_from_pool(pool_csv: Path, image_ids: List[str]) -> List[str]:
+def _parse_image_root_maps(values: Optional[List[str]]) -> List[tuple[str, str]]:
+    maps: List[tuple[str, str]] = []
+    for value in values or []:
+        if "=" not in value:
+            raise ValueError(
+                f"--image-root-map expects FROM=TO entries, got {value!r}"
+            )
+        src, dst = value.split("=", 1)
+        if not src:
+            raise ValueError(f"--image-root-map source prefix is empty: {value!r}")
+        maps.append((src, dst))
+    return maps
+
+
+def _rewrite_image_path(path: str, root_maps: List[tuple[str, str]]) -> str:
+    for src, dst in root_maps:
+        if path.startswith(src):
+            return dst + path[len(src) :]
+    return path
+
+
+def _image_paths_from_pool(
+    pool_csv: Path,
+    image_ids: List[str],
+    root_maps: Optional[List[tuple[str, str]]] = None,
+) -> List[str]:
     pool = pd.read_csv(pool_csv)
     if "image_id" not in pool.columns or "image_path" not in pool.columns:
         raise ValueError(
             f"{pool_csv} must have image_id and image_path columns for streamed eval"
         )
-    id_to_path = dict(zip(pool["image_id"].astype(str), pool["image_path"].astype(str)))
+    maps = root_maps or []
+    image_paths = [
+        _rewrite_image_path(path, maps)
+        for path in pool["image_path"].astype(str)
+    ]
+    id_to_path = dict(zip(pool["image_id"].astype(str), image_paths))
     missing = [iid for iid in image_ids if iid not in id_to_path]
     if missing:
         raise KeyError(
@@ -555,6 +585,9 @@ def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
                         help="Newline-delimited option keys or .h5 basenames.")
     parser.add_argument("--pool-csv", type=Path, required=True,
                         help="Stimulus pool CSV with image_id and image_path columns.")
+    parser.add_argument("--image-root-map", action="append", default=[],
+                        help="Rewrite image path prefixes from the pool CSV. "
+                             "Format: FROM=TO. May be passed more than once.")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--subjects", nargs="+",
                         default=["sub-01", "sub-03", "sub-05", "sub-06", "sub-07"])
@@ -635,7 +668,8 @@ def main(argv: Optional[list] = None) -> int:
     if not contexts:
         raise SystemExit("No brain contexts loaded")
     image_ids = contexts[0].bench_ids
-    image_paths = _image_paths_from_pool(args.pool_csv, image_ids)
+    image_root_maps = _parse_image_root_maps(args.image_root_map)
+    image_paths = _image_paths_from_pool(args.pool_csv, image_ids, image_root_maps)
     _log(f"Resolved {len(image_paths)} split-half images from {args.pool_csv}")
 
     all_rows: List[dict] = []
