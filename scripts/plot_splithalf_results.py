@@ -42,7 +42,7 @@ DEFAULT_NOISE_CEILING = Path(
 SUBJECTS = ["sub-01", "sub-03", "sub-05", "sub-06", "sub-07"]
 METRICS = ["crsa", "wrsa", "srpr"]
 PLOT_METRICS = ["crsa", "wrsa"]
-DROP_MODELS = {"efficientnet_b1_classification"}
+DROP_MODELS: set[str] = set()
 
 OKABE_ITO = {
     "black": "#000000",

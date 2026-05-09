@@ -37,7 +37,7 @@ DEFAULT_SCORE_FILES = (
     "best_layer_scores.csv",
 )
 DEFAULT_METRICS = ("crsa", "wrsa")
-DROP_MODELS = {"efficientnet_b1_classification"}
+DROP_MODELS: set[str] = set()
 
 
 @dataclass(frozen=True)

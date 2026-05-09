@@ -13,6 +13,7 @@ from sklearn.linear_model._ridge import _check_gcv_mode, _check_sample_weight
 
 from scipy.stats import pearsonr
 from sklearn.metrics import explained_variance_score
+from sklearn.utils.validation import validate_data
 
 pearsonr_vec = np.vectorize(pearsonr, signature='(n),(n)->(),()')
 
@@ -50,14 +51,25 @@ class _RidgeGCVMod(_RidgeGCV):
     def fit(self, X, y, sample_weight=None):
         _normalize = False
 
-        X, y = self._validate_data(
-            X,
-            y,
-            accept_sparse=["csr", "csc", "coo"],
-            dtype=[np.float64],
-            multi_output=True,
-            y_numeric=True,
-        )
+        if hasattr(self, "_validate_data"):
+            X, y = self._validate_data(
+                X,
+                y,
+                accept_sparse=["csr", "csc", "coo"],
+                dtype=[np.float64],
+                multi_output=True,
+                y_numeric=True,
+            )
+        else:
+            X, y = validate_data(
+                self,
+                X,
+                y,
+                accept_sparse=["csr", "csc", "coo"],
+                dtype=[np.float64],
+                multi_output=True,
+                y_numeric=True,
+            )
 
         # alpha_per_target cannot be used in classifier mode. All subclasses
         # of _RidgeGCV that are classifiers keep alpha_per_target at its
@@ -73,13 +85,17 @@ class _RidgeGCVMod(_RidgeGCV):
                 "negative or null value instead.".format(self.alphas)
             )
 
-        X, y, X_offset, y_offset, X_scale = _preprocess_data(
+        preprocessed = _preprocess_data(
             X,
             y,
             fit_intercept=self.fit_intercept,
             copy=self.copy_X,
             sample_weight=sample_weight,
         )
+        if len(preprocessed) == 6:
+            X, y, X_offset, y_offset, X_scale, _sample_weight_sqrt = preprocessed
+        else:
+            X, y, X_offset, y_offset, X_scale = preprocessed
 
         gcv_mode = _check_gcv_mode(X, self.gcv_mode)
 
@@ -97,8 +113,12 @@ class _RidgeGCVMod(_RidgeGCV):
         n_samples = X.shape[0]
 
         if sample_weight is not None:
-            X, y = _rescale_data(X, y, sample_weight)
-            sqrt_sw = np.sqrt(sample_weight)
+            rescaled = _rescale_data(X, y, sample_weight)
+            if len(rescaled) == 3:
+                X, y, sqrt_sw = rescaled
+            else:
+                X, y = rescaled
+                sqrt_sw = np.sqrt(sample_weight)
         else:
             sqrt_sw = np.ones(n_samples, dtype=X.dtype)
 

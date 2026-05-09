@@ -32,7 +32,7 @@ OKABE = {
     "gray": "#777777",
 }
 METRIC_ORDER = ("crsa", "wrsa", "srpr")
-METRIC_LABELS = {"crsa": "cRSA", "wrsa": "wRSA/veRSA", "srpr": "SRPR"}
+METRIC_LABELS = {"crsa": "cRSA", "wrsa": "veRSA", "srpr": "SRPR"}
 METRIC_COLORS = {"crsa": OKABE["black"], "wrsa": OKABE["blue"], "srpr": OKABE["vermillion"]}
 
 
@@ -54,7 +54,7 @@ SPLITS = (
     SplitFamily(
         "splithalf",
         "Odd/Even Split-Half",
-        "Closest direct replication of Conwell's shared-image split-half setup.",
+        "Uses Colin's released full second-half layer-search convention in a streamed odd/even extraction-to-fitting run.",
         (Variant("split-half", FIGURES / "splithalf_results"),),
     ),
     SplitFamily(
@@ -275,19 +275,20 @@ def score_summary(variants: tuple[Variant, ...]) -> list[dict[str, object]]:
         scores = read_scores(variant.path)
         for metric in METRIC_ORDER:
             group = scores[scores["eval_type"] == metric]
-            if group.empty:
+            finite = group[np.isfinite(group["test_score"])]
+            if finite.empty:
                 continue
             rows.append(
                 {
                     "variant": variant.label,
                     "metric": METRIC_LABELS.get(metric, metric),
-                    "n": len(group),
-                    "subjects": group["subject"].nunique(),
-                    "models": group["model"].nunique(),
-                    "mean": fmt_num(group["test_score"].mean(), 3),
-                    "median": fmt_num(group["test_score"].median(), 3),
-                    "min": fmt_num(group["test_score"].min(), 3),
-                    "max": fmt_num(group["test_score"].max(), 3),
+                    "n": len(finite),
+                    "subjects": finite["subject"].nunique(),
+                    "models": finite["model"].nunique(),
+                    "mean": fmt_num(finite["test_score"].mean(), 3),
+                    "median": fmt_num(finite["test_score"].median(), 3),
+                    "min": fmt_num(finite["test_score"].min(), 3),
+                    "max": fmt_num(finite["test_score"].max(), 3),
                 }
             )
     return rows
@@ -397,7 +398,8 @@ def overview_rows() -> list[dict[str, object]]:
             scores = read_scores(variant.path)
             for metric in METRIC_ORDER:
                 group = scores[scores["eval_type"] == metric]
-                if group.empty:
+                finite = group[np.isfinite(group["test_score"])]
+                if finite.empty:
                     continue
                 rows.append(
                     {
@@ -405,13 +407,13 @@ def overview_rows() -> list[dict[str, object]]:
                         "variant": variant.label,
                         "metric": METRIC_LABELS.get(metric, metric),
                         "metric_id": metric,
-                        "mean": float(group["test_score"].mean()),
-                        "median": float(group["test_score"].median()),
-                        "min": float(group["test_score"].min()),
-                        "max": float(group["test_score"].max()),
-                        "n": len(group),
-                        "subjects": group["subject"].nunique(),
-                        "models": group["model"].nunique(),
+                        "mean": float(finite["test_score"].mean()),
+                        "median": float(finite["test_score"].median()),
+                        "min": float(finite["test_score"].min()),
+                        "max": float(finite["test_score"].max()),
+                        "n": len(finite),
+                        "subjects": finite["subject"].nunique(),
+                        "models": finite["model"].nunique(),
                     }
                 )
     return rows
@@ -778,9 +780,11 @@ def build_report() -> None:
     lines: list[str] = [
         "# LAION-fMRI Conwell Fig. 2-4 Replication Report",
         "",
-        "This report summarizes the completed OTC analyses for the Conwell-style controlled comparisons: architecture variation (Fig. 2), task variation (Fig. 3), and input-diet variation (Fig. 4). The internal metric named `wrsa` is the voxel-encoding RSA metric corresponding most closely to Conwell's veRSA, so it is labeled here as wRSA/veRSA.",
+        "This report summarizes the completed OTC analyses for the Conwell-style controlled comparisons: architecture variation (Fig. 2), task variation (Fig. 3), and input-diet variation (Fig. 4). The internal metric named `wrsa` is Conwell's voxel-encoding RSA metric, veRSA.",
         "",
-        "The LAION-fMRI analyses use 5 subjects and 117 plotted models after dropping the known `efficientnet_b1_classification` coverage issue. Conwell's paper used the NSD shared-image setting with 4 subjects and a larger model survey, so the most important comparison is the direction and relative size of controlled effects rather than exact equality of absolute scores.",
+        "The LAION-fMRI analyses use 5 subjects. The streamed split-half analysis includes 118 plotted models; the cached generalization analyses include 117 plotted models. Conwell's paper used the NSD shared-image setting with 4 subjects and a larger model survey, so the most important comparison is the direction and relative size of controlled effects rather than exact equality of absolute scores.",
+        "",
+        "The Odd/Even Split-Half section uses a streamed extraction-to-fitting run that follows Colin's released DeepNSD full second-half layer-search convention directly, with the ncsnr-derived noise ceiling and held-out test scores taken from the layer with the best training score. The random, cluster, tau, OOD, and OOD-inclusive split-half analyses use the cached approximate ten-layer-per-model feature set for computational tractability, so their absolute scores are not pure split-difficulty contrasts against the split-half run.",
         "",
         "## Supporting Tables",
         "",
@@ -800,18 +804,11 @@ def build_report() -> None:
     )
     lines.extend(
         [
-            "## Initial Reading",
-            "",
-            "- Absolute LAION-fMRI wRSA/veRSA scores are generally below the headline Conwell NSD values, especially for split-half, cluster, and OOD tests. The strongest LAION-fMRI aggregates are random and tau splits, while cluster and OOD splits are visibly harder.",
-            "- The cRSA architecture effect consistently preserves the Conwell direction: transformers are below CNNs. In wRSA/veRSA, however, the LAION-fMRI estimates often flip slightly positive for transformers, so the architecture conclusion is not a literal replication in the voxel-encoding metric.",
-            "- The contrastive self-supervised advantage is robust in the random, cluster, tau, and plain split-half analyses, broadly matching Conwell's qualitative result.",
-            "- The SLIP comparison mostly matches Conwell's qualitative pattern in the split variants where CLIP is below SimCLR and SLIP is close to SimCLR. The OOD-inclusive split-half result should be read more cautiously because its score scale differs from the other split families.",
-            "- The ImageNet21K comparison remains small, consistent with Conwell's conclusion that the larger ImageNet21K diet does not clearly improve OTC predictivity. Some LAION-fMRI wRSA/veRSA estimates are slightly negative.",
-            "- The IPCL input-diet result is only partial: Places and VGGFace2 are often below ImageNet in wRSA/veRSA, but the cRSA VGGFace2 effect is not consistently Conwell-like and OOD results can invert. This is the main controlled input-diet comparison to inspect manually in Fig. 4.",
-            "",
             "## Caveats",
             "",
-            "- These analyses use the current OTC ROI and the plotted 117-model subset. Conwell's paper reports NSD OTC results over a larger model survey and 4 subjects.",
+            "- These analyses use the current OTC ROI. Conwell's paper reports NSD OTC results over a larger model survey and 4 subjects.",
+            "- Candidate layer coverage differs by split family: the plain split-half replication searches all DeepNSD-discovered second-half layers in a streamed extraction-to-fitting pass, whereas the other evaluation families search the cached approximately ten-layer second-half subset per model.",
+            "- The current split-half veRSA table has 10 NaN selected-layer scores from two XCiT nano models, so finite-score summaries exclude those rows for that metric.",
             "- OOD sections use the aggregate `ood_type=all` rows from the current evaluator. They do not show the nine OOD types separately.",
             "- The language-alignment table compares CLIP and SLIP to SimCLR using the implemented Conwell-style fixed-effect test. It does not include the model-size interaction discussed in the paper narrative.",
             "- SRPR is included descriptively because it is useful for this project, but it is not one of the Fig. 2-4 Conwell paper metrics.",

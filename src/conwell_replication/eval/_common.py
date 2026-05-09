@@ -304,6 +304,8 @@ def fit_ridge(
     cv_values = getattr(ridge, "cv_values_", getattr(ridge, "cv_results_", None))
     if cv_values is None:
         raise RuntimeError("RidgeCVMod produced no cv_values_/cv_results_")
+    if cv_values.ndim == 2:
+        cv_values = cv_values.reshape(X_train_s.shape[0], y_train.shape[1], len(alphas))
     pred_train = np.take_along_axis(
         cv_values, best_alpha_idx[None, :, None], axis=2
     )[:, :, 0]

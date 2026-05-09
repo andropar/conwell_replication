@@ -1,2 +1,2 @@
 breakpoint_1_rank,breakpoint_1_score,breakpoint_2_rank,breakpoint_2_score,n_models_top_segment,n_models_middle_segment,n_models_bottom_segment,sse,metric,n_models,top_model,top_score,method,ci_method
-84,0.39011054039001464,101,0.19635679423809047,84,17,16,0.009701087034044754,wrsa,117,levit_128_classification,0.5260837495326995,pure_python_grid_search_two_breakpoints,not_computed
+78,0.4074413239955902,106,0.1430153653025627,78,28,10,0.008867916856085383,wrsa,116,gmlp_s16_224_classification,0.5426120162010193,pure_python_grid_search_two_breakpoints,not_computed

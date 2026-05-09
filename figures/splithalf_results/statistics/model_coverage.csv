@@ -1,5 +1,5 @@
 comparison_id,comparison,level,models_in_contrast,models_in_scores,missing_models,n_missing
-architecture,CNNs versus Transformers,Convolutional,34,33,efficientnet_b1_classification,1
+architecture,CNNs versus Transformers,Convolutional,34,34,,0
 architecture,CNNs versus Transformers,Transformer,21,21,,0
 taskonomy_tasks,Taskonomy Encoders,autoencoding,1,1,,0
 taskonomy_tasks,Taskonomy Encoders,class_object,1,1,,0
