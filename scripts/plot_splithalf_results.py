@@ -18,13 +18,26 @@ import textwrap
 from pathlib import Path
 from typing import Iterable
 
+import colorsys
+
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
+from matplotlib.offsetbox import AnchoredOffsetbox, HPacker, TextArea
 import numpy as np
 import pandas as pd
+
+
+def _saturate(hex_color: str, factor: float = 1.0) -> str:
+    """Multiply HLS saturation by ``factor`` (clamped to 1.0)."""
+    r, g, b = matplotlib.colors.to_rgb(hex_color)
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    s = min(1.0, s * factor)
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return matplotlib.colors.to_hex((r, g, b))
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,42 +57,58 @@ METRICS = ["crsa", "wrsa", "srpr"]
 PLOT_METRICS = ["crsa", "wrsa"]
 DROP_MODELS: set[str] = set()
 
-OKABE_ITO = {
-    "black": "#000000",
-    "orange": "#e69f00",
-    "sky": "#56b4e9",
-    "green": "#009e73",
-    "yellow": "#f0e442",
-    "blue": "#0072b2",
-    "vermillion": "#d55e00",
-    "purple": "#cc79a7",
-    "gray": "#777777",
-    "light_gray": "#d0d0d0",
+# Palette extracted pixel-by-pixel from conwell_figures/fig{2,3,4}.png. Each
+# value is the median hue sampled from the colored italic group labels or
+# filled veRSA boxes in the published figures. Saturation is boosted on top of
+# the raw hues so the colors read more vividly on screen than the muted
+# publication PNGs.
+_RAW_CONWELL = {
+    "cnn_salmon":      "#d6859a",  # fig2 CNN label + box (rose salmon)
+    "transformer":     "#cb7c62",  # fig2 Transformer box (peachy red)
+    "taskonomy_olive": "#c79e5b",  # fig3a Taskonomy label
+    "ssl_olive":       "#a4982f",  # fig3b SSL label
+    "simclr_pink":     "#d6859a",  # fig3c SimCLR — same family as CNN salmon
+    "clip_peach":      "#cb7c62",  # fig3c CLIP — same as Transformer peach
+    "slip_green":      "#4faa7a",  # fig3c SLIP teal-green
+    "in_blue":         "#6ba0e1",  # fig4a ImageNet-1K AND ImageNet-21K (same)
+    "ipcl_imagenet":   "#9f96e4",  # fig4b IPCL Imagenet purple
+    "ipcl_openimages": "#ca6bc5",  # fig4b IPCL OpenImages magenta
+    "ipcl_places256":  "#d46da8",  # fig4b IPCL Places256 rose
+    "ipcl_vggface2":   "#d68069",  # fig4b IPCL VGGFace2 peach (extrapolated)
 }
+_SAT_BOOST = 1.45
+CONWELL = {k: _saturate(v, _SAT_BOOST) for k, v in _RAW_CONWELL.items()}
+CONWELL.update({
+    "gray_mid":   "#8a8a8a",
+    "gray_dark":  "#3a3a3a",
+    "noise_band": "#d5d5d5",
+    "noise_line": "#7a7a7a",
+})
 
 COLORS = {
-    "cnn": OKABE_ITO["orange"],
-    "transformer": OKABE_ITO["blue"],
-    "taskonomy": OKABE_ITO["green"],
-    "task_2d": OKABE_ITO["blue"],
-    "task_3d": OKABE_ITO["orange"],
-    "task_geometric": OKABE_ITO["green"],
-    "task_semantic": OKABE_ITO["purple"],
-    "task_other": OKABE_ITO["gray"],
-    "task_random": OKABE_ITO["black"],
-    "contrastive": OKABE_ITO["orange"],
-    "noncontrastive": OKABE_ITO["purple"],
-    "supervised": OKABE_ITO["gray"],
-    "simclr": OKABE_ITO["orange"],
-    "clip": OKABE_ITO["blue"],
-    "slip": OKABE_ITO["green"],
-    "in1k": OKABE_ITO["vermillion"],
-    "in21k": OKABE_ITO["green"],
-    "ipcl_imagenet": OKABE_ITO["blue"],
-    "ipcl_openimages": OKABE_ITO["orange"],
-    "ipcl_places256": OKABE_ITO["green"],
-    "ipcl_vggface2": OKABE_ITO["purple"],
-    "noise": "#cfcfcf",
+    "cnn": CONWELL["cnn_salmon"],
+    "transformer": CONWELL["transformer"],
+    "taskonomy": CONWELL["taskonomy_olive"],
+    # Kept for legacy callers; Conwell collapses Taskonomy onto a single hue.
+    "task_2d": CONWELL["taskonomy_olive"],
+    "task_3d": CONWELL["taskonomy_olive"],
+    "task_geometric": CONWELL["taskonomy_olive"],
+    "task_semantic": CONWELL["taskonomy_olive"],
+    "task_other": CONWELL["taskonomy_olive"],
+    "task_random": CONWELL["taskonomy_olive"],
+    "contrastive": CONWELL["ssl_olive"],
+    "noncontrastive": CONWELL["ssl_olive"],
+    "supervised": CONWELL["gray_mid"],
+    "simclr": CONWELL["simclr_pink"],
+    "clip": CONWELL["clip_peach"],
+    "slip": CONWELL["slip_green"],
+    "in1k": CONWELL["in_blue"],
+    "in21k": CONWELL["in_blue"],
+    "ipcl_imagenet": CONWELL["ipcl_imagenet"],
+    "ipcl_openimages": CONWELL["ipcl_openimages"],
+    "ipcl_places256": CONWELL["ipcl_places256"],
+    "ipcl_vggface2": CONWELL["ipcl_vggface2"],
+    "noise": CONWELL["noise_band"],
 }
 
 
@@ -152,6 +181,15 @@ def parse_args() -> argparse.Namespace:
         help="Bootstrap resamples for grand-mean-centered CIs. Default: 10000",
     )
     parser.add_argument(
+        "--from-stats",
+        action="store_true",
+        help=(
+            "Skip parquet loading; redraw figures using the previously written "
+            "model_metric_subject_scores.csv and noise_ceiling_summary.csv in "
+            "--out-dir. Useful for restyling without rerunning the pipeline."
+        ),
+    )
+    parser.add_argument(
         "--filter-split",
         default=None,
         help="If results contain a 'split' column (min-nn output), keep only this split.",
@@ -173,23 +211,23 @@ def parse_args() -> argparse.Namespace:
 def set_style() -> None:
     matplotlib.rcParams.update(
         {
-            "font.size": 7,
-            "axes.titlesize": 7.5,
-            "axes.labelsize": 7,
-            "xtick.labelsize": 5.5,
-            "ytick.labelsize": 6,
-            "legend.fontsize": 6,
+            "font.size": 8,
+            "axes.titlesize": 8.5,
+            "axes.labelsize": 8,
+            "xtick.labelsize": 6.5,
+            "ytick.labelsize": 7,
+            "legend.fontsize": 7,
             "figure.dpi": 150,
             "savefig.dpi": 300,
             "savefig.bbox": "tight",
-            "savefig.pad_inches": 0.04,
+            "savefig.pad_inches": 0.06,
             "font.family": "sans-serif",
             "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
             "axes.spines.top": False,
             "axes.spines.right": False,
-            "axes.linewidth": 0.55,
-            "xtick.major.width": 0.55,
-            "ytick.major.width": 0.55,
+            "axes.linewidth": 0.6,
+            "xtick.major.width": 0.6,
+            "ytick.major.width": 0.6,
             "xtick.major.size": 2.5,
             "ytick.major.size": 2.5,
             "pdf.fonttype": 42,
@@ -647,18 +685,19 @@ def load_noise_ceiling(args: argparse.Namespace, out_dir: Path) -> pd.DataFrame 
 
 
 def draw_noise_ceiling(ax: matplotlib.axes.Axes, nc: pd.DataFrame | None) -> float | None:
+    """Single thick gray bar at the mean noise ceiling (no per-subject band)."""
     if nc is None or nc.empty:
         return None
     vals = nc["nc_pearson"].dropna().to_numpy(dtype=float)
     if len(vals) == 0:
         return None
-    lo, hi, mean = float(vals.min()), float(vals.max()), float(vals.mean())
-    ax.axhspan(lo, hi, color=COLORS["noise"], alpha=0.35, zorder=0, linewidth=0)
-    ax.axhline(mean, color="#777777", linewidth=0.65, linestyle="--", alpha=0.7, zorder=1)
+    mean = float(vals.mean())
+    ax.axhline(mean, color=CONWELL["noise_line"], linewidth=2.4, alpha=0.95, zorder=1)
     return mean
 
 
 def add_eve_axis(ax: matplotlib.axes.Axes, nc: pd.DataFrame | None) -> None:
+    """Right axis labels EVE = r^2 / nc^2 at Conwell-style non-uniform ticks."""
     if nc is None or nc.empty:
         return
     mean_nc = float(nc["nc_pearson"].mean())
@@ -667,19 +706,32 @@ def add_eve_axis(ax: matplotlib.axes.Axes, nc: pd.DataFrame | None) -> None:
     twin = ax.twinx()
     twin.set_ylim(ax.get_ylim())
     y_lo, y_hi = ax.get_ylim()
-    # Cap EVE ticks at the mean NC: by definition, EVE = 1 at r = nc, so any
-    # tick above mean_nc would render EVE > 1 — that's a display artifact, not
-    # a meaningful claim. Clamp the right-axis ticks so EVE never exceeds 1.
-    ticks = [
-        t for t in ax.get_yticks()
-        if y_lo <= t <= y_hi and 0.0 <= t <= mean_nc + 1e-9
-    ]
-    twin.set_yticks(ticks)
-    twin.set_yticklabels([f"{(t * t) / (mean_nc * mean_nc):.2f}" for t in ticks])
-    twin.set_ylabel("explainable variance explained")
+
+    eve_targets = [0.08, 0.14, 0.39, 0.56, 0.77, 1.00]
+    nc2 = mean_nc * mean_nc
+    tick_positions: list[float] = []
+    tick_labels: list[str] = []
+    for eve in eve_targets:
+        r = math.sqrt(max(eve * nc2, 0.0))
+        if r < y_lo - 1e-9 or r > y_hi + 1e-9:
+            continue
+        tick_positions.append(r)
+        tick_labels.append(f"{eve:.2f}".lstrip("0") if eve < 1 else "1.00")
+    twin.set_yticks(tick_positions)
+    twin.set_yticklabels(tick_labels)
+    twin.set_ylabel("Variance Explained", color=CONWELL["gray_dark"])
     twin.spines["right"].set_visible(True)
+    twin.spines["right"].set_color(CONWELL["gray_mid"])
     twin.spines["top"].set_visible(False)
-    twin.tick_params(width=0.55, length=2.5)
+    twin.tick_params(width=0.55, length=2.5, colors=CONWELL["gray_dark"])
+
+
+def _darken(hex_color: str, factor: float) -> str:
+    """Return a darker shade of ``hex_color`` (factor < 1 darkens)."""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    r, g, b = (int(c * factor) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def draw_box(
@@ -688,7 +740,7 @@ def draw_box(
     row: pd.Series,
     color: str,
     eval_type: str,
-    width: float = 0.72,
+    width: float = 1.0,
 ) -> None:
     mean = float(row["mean"])
     lo = float(row["ci_lo"])
@@ -699,22 +751,22 @@ def draw_box(
         lo, hi = mean - 0.001, mean + 0.001
 
     is_crsa = eval_type == "crsa"
-    face = "white" if is_crsa else color
-    edge = "#666666" if is_crsa else color
-    alpha = 0.82 if is_crsa else 0.72
+    # Box outline + mean line always in the group color at full opacity. The
+    # fill is the box color, but only veRSA carries a (semi-transparent) fill;
+    # cRSA stays unfilled.
+    face_rgba = (*matplotlib.colors.to_rgb(color), 0.0 if is_crsa else 0.30)
+    edge = color
     rect = mpatches.Rectangle(
         (x - width / 2, lo),
         width,
         hi - lo,
-        facecolor=face,
+        facecolor=face_rgba,
         edgecolor=edge,
-        linewidth=0.55,
-        alpha=alpha,
+        linewidth=0.7,
         zorder=3 if is_crsa else 4,
     )
     ax.add_patch(rect)
-    line_color = "black" if is_crsa else "white"
-    ax.hlines(mean, x - width / 2, x + width / 2, color=line_color, linewidth=0.65, zorder=5)
+    ax.hlines(mean, x - width / 2, x + width / 2, color=color, linewidth=1.6, zorder=5)
 
 
 def draw_group_ribbon(
@@ -727,30 +779,34 @@ def draw_group_ribbon(
     rng: np.random.Generator,
     n_boot: int,
 ) -> dict:
+    """Group-level CI ribbon, Conwell-styled.
+
+    veRSA gets a filled colored rectangle spanning the bootstrap CI of the
+    group mean (matching Conwell's "median box for the wRSA scores is
+    filled"). cRSA gets the same rectangle but outlined only (no fill), so
+    the two ribbons are visually parallel to the per-model boxes.
+    """
     vals = stats["mean"].dropna().to_numpy(dtype=float)
     if len(vals) == 0:
         return {"mean": np.nan, "ci_lo": np.nan, "ci_hi": np.nan}
     mean = float(vals.mean())
     ci_lo, ci_hi = centered_bootstrap_ci(vals, rng, n_boot)
-    if ci_hi - ci_lo < 0.002:
-        ci_lo, ci_hi = mean - 0.001, mean + 0.001
+    if not np.isfinite(ci_lo) or not np.isfinite(ci_hi) or (ci_hi - ci_lo) < 0.002:
+        ci_lo, ci_hi = mean - 0.0015, mean + 0.0015
 
     is_crsa = eval_type == "crsa"
-    face = "white" if is_crsa else color
-    edge = "#666666" if is_crsa else color
+    face_rgba = (*matplotlib.colors.to_rgb(color), 0.0 if is_crsa else 0.25)
     rect = mpatches.Rectangle(
         (x_start, ci_lo),
         x_end - x_start,
         ci_hi - ci_lo,
-        facecolor=face,
-        edgecolor=edge,
-        linewidth=0.85,
-        alpha=0.28 if is_crsa else 0.34,
-        hatch="////",
-        zorder=6 if is_crsa else 7,
+        facecolor=face_rgba,
+        edgecolor=color,
+        linewidth=0.7,
+        linestyle=(0, (1.2, 1.4)),
+        zorder=2,
     )
     ax.add_patch(rect)
-    ax.hlines(mean, x_start, x_end, color=edge, linewidth=1.0, zorder=8)
     return {"mean": mean, "ci_lo": ci_lo, "ci_hi": ci_hi}
 
 
@@ -794,12 +850,14 @@ def draw_controlled_panel(
     nc: pd.DataFrame | None,
     rng: np.random.Generator,
     n_boot: int,
-    title: str,
+    title: str | None = None,
     label_func=short_label,
-    xtick_fontsize: float = 4.0,
-    group_label_fontsize: float = 5.4,
+    xtick_fontsize: float = 5.5,
+    group_label_fontsize: float = 9.0,
     ylabel: bool = False,
     show_legend: bool = False,
+    group_label_y: float = 0.03,
+    group_label_mode: str = "centered",
 ) -> pd.DataFrame:
     panel_stats, spans = prepare_panel_source(best, panel_name, groups, rng, n_boot)
     draw_noise_ceiling(ax, nc)
@@ -818,8 +876,8 @@ def draw_controlled_panel(
                 ribbon = draw_group_ribbon(
                     ax,
                     stats,
-                    x_start - 0.38,
-                    x_end + 0.38,
+                    x_start - 0.5,
+                    x_end + 0.5,
                     color,
                     eval_type,
                     rng,
@@ -830,74 +888,84 @@ def draw_controlled_panel(
                         "panel": panel_name,
                         "group_label": group_label,
                         "eval_type": eval_type,
-                        "x_start": x_start - 0.38,
-                        "x_end": x_end + 0.38,
+                        "x_start": x_start - 0.5,
+                        "x_end": x_end + 0.5,
                         **ribbon,
                     }
                 )
 
-    ticks, labels = [], []
-    group_centers, group_labels = [], []
+    ticks, labels, tick_colors = [], [], []
+    group_centers, group_text, group_colors = [], [], []
     for group_label, (x_start, x_end, ordered) in spans.items():
+        color = next(c for label, _, c in groups if label == group_label)
         for i, model in enumerate(ordered):
             ticks.append(x_start + i)
             labels.append(label_func(model))
+            tick_colors.append(color)
         group_centers.append((x_start + x_end) / 2)
-        group_labels.append(f"{group_label}\n(n={len(ordered)})")
+        group_text.append(group_label)
+        group_colors.append(color)
 
     ax.set_xticks(ticks)
     ax.set_xticklabels(labels, rotation=60, ha="right", fontsize=xtick_fontsize)
+    # Tick marks gray, but each label keeps its group color. tick_params has
+    # to run BEFORE the per-label color/style loop because labelcolor here
+    # would otherwise overwrite the colored labels.
+    ax.tick_params(axis="x", which="both", color=CONWELL["gray_mid"], length=2.0)
+    for tick_label, color in zip(ax.get_xticklabels(), tick_colors):
+        tick_label.set_color(color)
+        tick_label.set_style("italic")
     ax.set_xlabel("")
     if ylabel:
-        ax.set_ylabel("brain predictivity ($r_{Pearson}$)")
-    ax.set_title(title, loc="left", fontweight="bold", pad=5)
+        ax.set_ylabel(r"$r_{\mathrm{Pearson}}$ (Score)")
+    if title:
+        ax.set_title(title, loc="left", fontsize=8.5, color=CONWELL["gray_dark"], pad=4)
     if ticks:
         ax.set_xlim(min(ticks) - 1.0, max(ticks) + 1.0)
 
+    nc_mean = float(nc["nc_pearson"].mean()) if nc is not None and not nc.empty else np.nan
     data_hi = panel_stats["ci_hi"].max() if not panel_stats.empty else 0.3
-    data_lo = panel_stats["ci_lo"].min() if not panel_stats.empty else 0.0
-    nc_hi = nc["nc_pearson"].max() if nc is not None and not nc.empty else np.nan
-    y_top = max(float(data_hi) + 0.06, float(nc_hi) + 0.05 if np.isfinite(nc_hi) else 0.0)
-    y_bottom = min(-0.08, float(data_lo) - 0.02)
-    ax.set_ylim(y_bottom, y_top)
-    ax.axhline(0, color="black", linewidth=0.45, alpha=0.45, zorder=1)
+    y_top = float(nc_mean) if np.isfinite(nc_mean) else float(data_hi) + 0.06
+    ax.set_ylim(0.0, y_top)
 
-    label_y = y_top - 0.035
-    label_levels: list[int] = []
-    prev_center = -np.inf
-    for center in group_centers:
-        if center - prev_center < 4.6 and label_levels:
-            label_levels.append((label_levels[-1] + 1) % 3)
-        else:
-            label_levels.append(0)
-        prev_center = center
-    for center, text, level in zip(group_centers, group_labels, label_levels):
-        ax.text(
-            center,
-            label_y - level * 0.026,
-            text,
-            ha="center",
-            va="top",
+    # Group labels inside the plot, sitting just above the x-axis.
+    if group_label_mode == "hpacker":
+        color_by_group = {label: color for label, color in zip(group_text, group_colors)}
+        _draw_bottom_group_labels(
+            ax,
+            group_text,
+            color_by_group,
+            y=group_label_y,
             fontsize=group_label_fontsize,
-            color="#444444",
-            linespacing=0.9,
         )
+    else:
+        blended = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        for center, text, color in zip(group_centers, group_text, group_colors):
+            ax.text(
+                center,
+                group_label_y,
+                text,
+                transform=blended,
+                ha="center",
+                va="bottom",
+                fontsize=group_label_fontsize,
+                color=color,
+                style="italic",
+                fontweight=900,
+            )
 
     if show_legend:
         handles = [
-            mpatches.Patch(facecolor="white", edgecolor="#666666", linewidth=0.55, label="cRSA"),
-            mpatches.Patch(facecolor=OKABE_ITO["blue"], edgecolor=OKABE_ITO["blue"], alpha=0.72, label="veRSA / wRSA"),
+            mpatches.Patch(facecolor="white", edgecolor=CONWELL["crsa_edge"], linewidth=0.6, label="cRSA"),
+            mpatches.Patch(facecolor=CONWELL["gray_mid"], edgecolor=CONWELL["gray_mid"], alpha=0.9, label="veRSA / wRSA"),
         ]
         if nc is not None and not nc.empty:
-            handles.append(mpatches.Patch(facecolor=COLORS["noise"], edgecolor="none", alpha=0.35, label="noise ceiling"))
-        # Place the legend below the x-axis tick labels so it never collides
-        # with the per-group titles ("Convolutional (n=33)") at the top of the
-        # panel.
+            handles.append(mpatches.Patch(facecolor=COLORS["noise"], edgecolor="none", alpha=0.55, label="noise ceiling"))
         ax.legend(
             handles=handles,
             frameon=False,
             loc="upper center",
-            bbox_to_anchor=(0.5, -0.42),
+            bbox_to_anchor=(0.5, -0.55),
             ncol=len(handles),
             columnspacing=1.4,
         )
@@ -921,11 +989,13 @@ def draw_ranked_panel(
     nc: pd.DataFrame | None,
     rng: np.random.Generator,
     n_boot: int,
-    title: str,
+    title: str | None = None,
     label_func=short_label,
-    xtick_fontsize: float = 4.0,
+    xtick_fontsize: float = 5.5,
     ylabel: bool = False,
     show_category_legend: bool = True,
+    group_label_y: float = 0.03,
+    group_label_fontsize: float = 7.5,
 ) -> pd.DataFrame:
     """Draw one globally ranked model axis, coloring models by source group."""
     model_group: dict[str, tuple[str, str]] = {}
@@ -955,23 +1025,45 @@ def draw_ranked_panel(
         color = str(row["group_color"])
         draw_box(ax, float(row["x"]), row, color, str(row["eval_type"]))
 
+    # Single dashed reference line per eval_type at the panel-wide mean of means.
+    for eval_type in PLOT_METRICS:
+        es = panel_stats[panel_stats["eval_type"] == eval_type]
+        if es.empty:
+            continue
+        mean_of_means = float(es["mean"].mean())
+        is_crsa = eval_type == "crsa"
+        line_color = CONWELL["gray_dark"] if is_crsa else CONWELL["gray_mid"]
+        ax.hlines(
+            mean_of_means,
+            -1.0 + 0.5,
+            len(ordered) + 0.5 - 1.0,
+            colors=line_color,
+            linestyles=(0, (4.5, 2.5)),
+            linewidth=0.7,
+            alpha=0.6,
+            zorder=2,
+        )
+
     ticks = list(range(len(ordered)))
+    tick_colors = [model_group[m][1] for m in ordered]
     ax.set_xticks(ticks)
     ax.set_xticklabels([label_func(model) for model in ordered], rotation=60, ha="right", fontsize=xtick_fontsize)
+    ax.tick_params(axis="x", which="both", color=CONWELL["gray_mid"], length=2.0)
+    for tick_label, color in zip(ax.get_xticklabels(), tick_colors):
+        tick_label.set_color(color)
+        tick_label.set_style("italic")
     ax.set_xlabel("")
     if ylabel:
-        ax.set_ylabel("brain predictivity ($r_{Pearson}$)")
-    ax.set_title(title, loc="left", fontweight="bold", pad=5)
+        ax.set_ylabel(r"$r_{\mathrm{Pearson}}$ (Score)")
+    if title:
+        ax.set_title(title, loc="left", fontsize=8.5, color=CONWELL["gray_dark"], pad=4)
     if ticks:
         ax.set_xlim(min(ticks) - 1.0, max(ticks) + 1.0)
 
+    nc_mean = float(nc["nc_pearson"].mean()) if nc is not None and not nc.empty else np.nan
     data_hi = panel_stats["ci_hi"].max() if not panel_stats.empty else 0.3
-    data_lo = panel_stats["ci_lo"].min() if not panel_stats.empty else 0.0
-    nc_hi = nc["nc_pearson"].max() if nc is not None and not nc.empty else np.nan
-    y_top = max(float(data_hi) + 0.06, float(nc_hi) + 0.05 if np.isfinite(nc_hi) else 0.0)
-    y_bottom = min(-0.08, float(data_lo) - 0.02)
-    ax.set_ylim(y_bottom, y_top)
-    ax.axhline(0, color="black", linewidth=0.45, alpha=0.45, zorder=1)
+    y_top = float(nc_mean) if np.isfinite(nc_mean) else float(data_hi) + 0.06
+    ax.set_ylim(0.0, y_top)
 
     if show_category_legend:
         present = unique_ordered(panel_stats["group_label"]) if not panel_stats.empty else []
@@ -980,25 +1072,74 @@ def draw_ranked_panel(
             for group_label, _, color in groups
             if group_label in set(present)
         }
-        handles = [
-            mpatches.Patch(facecolor=color_by_group[group], edgecolor=color_by_group[group], alpha=0.72, label=group)
-            for group in present
-        ]
-        if handles:
-            ax.legend(
-                handles=handles,
-                frameon=False,
-                loc="upper center",
-                bbox_to_anchor=(0.5, -0.40),
-                ncol=min(4, len(handles)),
-                columnspacing=1.1,
-                handlelength=1.0,
-            )
+        _draw_bottom_group_labels(
+            ax,
+            present,
+            color_by_group,
+            y=group_label_y,
+            fontsize=group_label_fontsize,
+        )
     return panel_stats
 
 
+def _draw_bottom_group_labels(
+    ax: matplotlib.axes.Axes,
+    labels: list[str],
+    color_by_label: dict[str, str],
+    y: float,
+    fontsize: float,
+) -> None:
+    """Place colored italic group labels in one centered row below the axis.
+
+    Uses matplotlib's HPacker so widths are measured per-glyph instead of
+    estimated from string length — that avoids the overlap we hit when
+    labels are short but very different in pixel width.
+    """
+    if not labels:
+        return
+    children = []
+    for i, label in enumerate(labels):
+        children.append(
+            TextArea(
+                label,
+                textprops=dict(
+                    color=color_by_label.get(label, CONWELL["gray_dark"]),
+                    fontsize=fontsize,
+                    style="italic",
+                    fontweight=900,
+                ),
+            )
+        )
+        if i < len(labels) - 1:
+            children.append(
+                TextArea(
+                    "|",
+                    textprops=dict(color=CONWELL["gray_mid"], fontsize=fontsize, fontweight=900),
+                )
+            )
+    hbox = HPacker(children=children, align="center", pad=0, sep=6)
+    box = AnchoredOffsetbox(
+        loc="lower center",
+        child=hbox,
+        frameon=False,
+        bbox_to_anchor=(0.5, y),
+        bbox_transform=ax.transAxes,
+        borderpad=0,
+    )
+    ax.add_artist(box)
+
+
 def add_panel_label(ax: matplotlib.axes.Axes, label: str) -> None:
-    ax.text(-0.14, 1.08, label, transform=ax.transAxes, fontweight="bold", fontsize=9, va="top")
+    ax.text(
+        -0.10,
+        1.04,
+        label,
+        transform=ax.transAxes,
+        fontweight="bold",
+        fontsize=10,
+        color=CONWELL["gray_dark"],
+        va="top",
+    )
 
 
 def plot_fig2_architecture(
@@ -1011,10 +1152,10 @@ def plot_fig2_architecture(
     n_boot: int,
 ) -> pd.DataFrame:
     groups = [
-        ("Convolutional", contrast_models(contrasts, "compare_architecture", "Convolutional"), COLORS["cnn"]),
-        ("Transformer", contrast_models(contrasts, "compare_architecture", "Transformer"), COLORS["transformer"]),
+        ("Convolutional Neural Networks", contrast_models(contrasts, "compare_architecture", "Convolutional"), COLORS["cnn"]),
+        ("Transformers", contrast_models(contrasts, "compare_architecture", "Transformer"), COLORS["transformer"]),
     ]
-    fig, ax = plt.subplots(figsize=(7.35, 3.25))
+    fig, ax = plt.subplots(figsize=(7.0, 5.0))
     stats = draw_controlled_panel(
         ax,
         best,
@@ -1023,16 +1164,16 @@ def plot_fig2_architecture(
         nc,
         rng,
         n_boot,
-        title="Fig. 2 | Architecture variation",
+        title=None,
         label_func=contrast_labeler(contrasts, 24),
-        xtick_fontsize=2.4,
-        group_label_fontsize=5.4,
+        xtick_fontsize=4.0,
+        group_label_fontsize=8.0,
         ylabel=True,
-        show_legend=True,
+        show_legend=False,
+        group_label_y=0.025,
     )
     add_eve_axis(ax, nc)
-    # Reserve space below the x-axis for the moved legend.
-    fig.subplots_adjust(bottom=0.42)
+    fig.subplots_adjust(bottom=0.20, top=0.96, left=0.08, right=0.93)
     save_figure(fig, out_dir, "fig2_architecture_variation", formats)
     return stats
 
@@ -1046,22 +1187,15 @@ def plot_fig3_task(
     rng: np.random.Generator,
     n_boot: int,
 ) -> pd.DataFrame:
-    task_cluster_colors = {
-        "2D": COLORS["task_2d"],
-        "3D": COLORS["task_3d"],
-        "Geometric": COLORS["task_geometric"],
-        "Semantic": COLORS["task_semantic"],
-        "Other": COLORS["task_other"],
-        "Random": COLORS["task_random"],
-    }
-    taskonomy_groups = [
-        (
-            cluster,
-            contrast_models(contrasts, "compare_goal_taskonomy_cluster", cluster),
-            task_cluster_colors[cluster],
-        )
+    # Conwell fig3a uses a single olive shade across every Taskonomy model and
+    # a single "Taskonomy Models" label, rather than per-cluster colors. We
+    # collapse the cluster contrasts into one group to match.
+    all_taskonomy = unique_ordered(
+        m
         for cluster in ["2D", "3D", "Geometric", "Semantic", "Other", "Random"]
-    ]
+        for m in contrast_models(contrasts, "compare_goal_taskonomy_cluster", cluster)
+    )
+    taskonomy_groups = [("Taskonomy Models", all_taskonomy, COLORS["taskonomy"])]
     vissl_groups = [
         (
             "Contrastive",
@@ -1093,7 +1227,7 @@ def plot_fig3_task(
         ),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(7.35, 3.55), gridspec_kw={"width_ratios": [1.35, 0.85, 0.9]})
+    fig, axes = plt.subplots(1, 3, figsize=(7.0, 5.2), gridspec_kw={"width_ratios": [1.35, 0.85, 0.9]})
     all_stats = []
     all_stats.append(
         draw_ranked_panel(
@@ -1106,8 +1240,10 @@ def plot_fig3_task(
             n_boot,
             title="Taskonomy ResNet50",
             label_func=contrast_labeler(contrasts, 18),
-            xtick_fontsize=3.3,
+            xtick_fontsize=5.0,
             ylabel=True,
+            group_label_y=0.025,
+            group_label_fontsize=7.0,
         )
     )
     all_stats.append(
@@ -1121,8 +1257,10 @@ def plot_fig3_task(
             n_boot,
             title="ResNet50 SSL",
             label_func=contrast_labeler(contrasts, 18),
-            xtick_fontsize=3.6,
-            group_label_fontsize=4.8,
+            xtick_fontsize=5.0,
+            group_label_fontsize=6.5,
+            group_label_y=0.025,
+            group_label_mode="hpacker",
         )
     )
     all_stats.append(
@@ -1136,20 +1274,21 @@ def plot_fig3_task(
             n_boot,
             title="SLIP ViT",
             label_func=contrast_labeler(contrasts, 18),
-            xtick_fontsize=3.6,
-            group_label_fontsize=5.0,
+            xtick_fontsize=5.0,
+            group_label_fontsize=6.5,
+            group_label_y=0.025,
+            group_label_mode="hpacker",
         )
     )
     for label, ax in zip("abc", axes):
         add_panel_label(ax, label)
 
-    # Use a common y range across panels after all panel-specific drawing.
     y0 = min(ax.get_ylim()[0] for ax in axes)
     y1 = max(ax.get_ylim()[1] for ax in axes)
     for ax in axes:
         ax.set_ylim(y0, y1)
     add_eve_axis(axes[-1], nc)
-    fig.subplots_adjust(wspace=0.34, bottom=0.34)
+    fig.subplots_adjust(wspace=0.34, bottom=0.22, top=0.94, left=0.08, right=0.93)
     save_figure(fig, out_dir, "fig3_task_variation", formats)
     return pd.concat(all_stats, ignore_index=True)
 
@@ -1179,7 +1318,7 @@ def plot_fig4_input(
         ("VGGFace2", contrast_models(contrasts, "compare_diet_ipcl", "vggface2"), COLORS["ipcl_vggface2"]),
     ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(7.35, 3.45), gridspec_kw={"width_ratios": [2.65, 1.0]})
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 5.1), gridspec_kw={"width_ratios": [2.65, 1.0]})
     stats_a = draw_controlled_panel(
         axes[0],
         best,
@@ -1190,9 +1329,10 @@ def plot_fig4_input(
         n_boot,
         title="ImageNet-1K vs ImageNet-21K",
         label_func=contrast_labeler(contrasts, 24),
-        xtick_fontsize=3.2,
-        group_label_fontsize=5.2,
+        xtick_fontsize=4.5,
+        group_label_fontsize=7.5,
         ylabel=True,
+        group_label_y=0.025,
     )
     stats_b = draw_ranked_panel(
         axes[1],
@@ -1204,7 +1344,9 @@ def plot_fig4_input(
         n_boot,
         title="IPCL input domains",
         label_func=contrast_labeler(contrasts, 16),
-        xtick_fontsize=4.8,
+        xtick_fontsize=5.5,
+        group_label_y=0.025,
+        group_label_fontsize=6.5,
     )
     for label, ax in zip("ab", axes):
         add_panel_label(ax, label)
@@ -1213,7 +1355,7 @@ def plot_fig4_input(
     for ax in axes:
         ax.set_ylim(y0, y1)
     add_eve_axis(axes[-1], nc)
-    fig.subplots_adjust(wspace=0.34, bottom=0.33)
+    fig.subplots_adjust(wspace=0.34, bottom=0.30, top=0.94, left=0.07, right=0.93)
     save_figure(fig, out_dir, "fig4_input_variation", formats)
     return pd.concat([stats_a, stats_b], ignore_index=True)
 
@@ -1304,11 +1446,38 @@ def write_controlled_summary(
     return text
 
 
+def _replot_from_stats(args: argparse.Namespace) -> None:
+    out_dir = args.out_dir
+    scores_path = out_dir / "model_metric_subject_scores.csv"
+    nc_path = out_dir / "noise_ceiling_summary.csv"
+    if not scores_path.exists():
+        raise SystemExit(f"--from-stats requires {scores_path}")
+    best = pd.read_csv(scores_path)
+    if args.region and "region" in best.columns:
+        best = best[best["region"] == args.region].reset_index(drop=True)
+    nc = pd.read_csv(nc_path) if nc_path.exists() else None
+    if nc is not None and nc.empty:
+        nc = None
+    contrasts = load_model_contrasts(args.model_contrasts, set(best["model"]))
+    rng = np.random.default_rng(20260504)
+    for fmt_path in list(out_dir.glob("fig*_*.png")) + list(out_dir.glob("fig*_*.pdf")):
+        fmt_path.unlink()
+    plot_fig2_architecture(best, contrasts, nc, out_dir, args.formats, rng, args.bootstrap)
+    plot_fig3_task(best, contrasts, nc, out_dir, args.formats, rng, args.bootstrap)
+    plot_fig4_input(best, contrasts, nc, out_dir, args.formats, rng, args.bootstrap)
+    print(f"Replotted figures in {out_dir}")
+
+
 def main() -> None:
     args = parse_args()
     set_style()
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.from_stats:
+        _replot_from_stats(args)
+        return
+
     clear_old_figures(out_dir)
 
     print(f"Loading parquet files from {args.results_dir}", flush=True)
