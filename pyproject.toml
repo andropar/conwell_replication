@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "conwell_replication"
 version = "0.1.0"
-description = "Replication of Conwell et al. (2024) on the LAION-fMRI dataset, using Conwell's DeepNSD extraction protocol, with min_nn generalization splits."
+description = "Research pipeline for adapting Conwell et al. (2024) model-brain alignment analyses to LAION-fMRI with DeepNSD feature extraction and RSA evaluations."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Johannes Roth" }]

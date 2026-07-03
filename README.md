@@ -1,8 +1,34 @@
-# conwell_replication
+# Conwell Replication on LAION-fMRI
 
-Replication analyses for [Conwell et al. (2024)](https://doi.org/10.1038/s41467-024-53972-1)
-on the [LAION-fMRI](https://laion-fmri.hebartlab.com/laion_fmri_package/index.html)
+Research code for adapting the model-brain alignment analyses from
+[Conwell et al. (2024)](https://doi.org/10.1038/s41467-024-53972-1) to the
+[LAION-fMRI](https://laion-fmri.hebartlab.com/laion_fmri_package/index.html)
 dataset.
+
+## At a Glance
+
+This repository turns the Conwell et al. DeepNSD-style evaluation pipeline into
+a LAION-fMRI replication and extension. It combines reproducible feature
+extraction, split-half and generalization RSA evaluations, noise-ceiling
+estimation, controlled model comparisons, and replotting tables for the main
+analysis figures.
+
+What is included:
+
+- A Python package for LAION-fMRI stimulus-pool construction, brain-response
+  caching, feature extraction, RSA evaluation, statistical summaries, and
+  plotting.
+- DeepNSD-compatible model manifests and comparison metadata for architecture,
+  task, self-supervised, SLIP, ImageNet-scale, and IPCL contrasts.
+- Method notes, runnable pipeline commands, lightweight CSV summaries, and
+  rendered figures for completed analyses.
+
+What is not included:
+
+- LAION-fMRI raw data, stimulus images, model checkpoints, and large HDF5,
+  parquet, or neuroimaging intermediates.
+
+![Overview score summary](reports/figures/overview_score_summary.png)
 
 The code follows the DeepNSD feature-extraction protocol used by Conwell et al.:
 
