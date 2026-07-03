@@ -28,7 +28,7 @@ What is not included:
 - LAION-fMRI raw data, stimulus images, model checkpoints, and large HDF5,
   parquet, or neuroimaging intermediates.
 
-![Overview score summary](reports/figures/overview_score_summary.png)
+![Figure 2 architecture variation](figures/splithalf_results/fig2_architecture_variation.png)
 
 The code follows the DeepNSD feature-extraction protocol used by Conwell et al.:
 
